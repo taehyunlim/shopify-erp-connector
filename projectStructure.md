@@ -1,12 +1,17 @@
 // PROJECT STRUCTURE
 .
-├── Order Import
+├── OrderImport
 |   ├── apiShopifyGet.js
 |   ├── queryMongoDbInsert.js
 |   └── exportErp.js
-├── Order Update
+|
+├── OrderUpdate
 |   ├── queryMssql.js
 |   ├── queryMongoDbUpdate.js
 |   └── apiShopifyPut.js
-└── models
-    └── OrderSchema.js
+|
+├── Models
+|   └── OrderSchema.js
+|   
+├── Export
+|   └── ShopifyAPI_Orders_YYYYMMDD_HHmm.xlsx

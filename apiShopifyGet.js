@@ -23,17 +23,18 @@ var shopname = config.shopify_shopname_dev;
 var mongoose = require('mongoose');
 var models = require('./models/OrderSchema.js')
 var db = mongoose.connection;
-var databaseName = 'zsdb';
+var databaseName = 'zsdb_test';
 var dbURI = 'mongodb://localhost:27017/' + databaseName;
 mongoose.Promise = global.Promise;
 
 // Global variables
 var baseurl = 'https://' + apikey + ':' + password + '@' + shopname + '.myshopify.com';
 var timestring = moment().format("YYYYMMDD_HHmm");
-var incomingPathName = './Orders/' //'ShopifyAPI_Orders_' + timestring +'.csv';
-var incomingFileName = 'ShopifyAPI_Orders_';
-var importPathName = '../SageInbound_current/NewOrder/.' //'OE_NewOrder_' + timestring + '_ZINUS.csv';
-var importFileName = 'OE_NewOrder_';
+var incomingPathName = './Export/';
+var incomingFileName = `ShopifyAPI_Orders_{$timestring}.csv`;
+// var importPathName ='../SageInbound_current/NewOrder/';
+var importPathName = './Export/';
+var importFileName = `OE_NewOrder_{$timestring}_ZINUS.csv`;
 var lastDocumentNo = '';
 
 // System log
@@ -47,3 +48,4 @@ const systemLog = (log) => {
 function truncateToCent(value) {
     return Number(Math.floor(value * 100) / 100);
 }
+
