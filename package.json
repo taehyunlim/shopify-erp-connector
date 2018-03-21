@@ -1,0 +1,29 @@
+{
+  "name": "shopify-erp-connector",
+  "version": "1.0.0",
+  "description": "",
+  "main": "apiShopifyGet.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taehyunlim/shopify-erp-connector.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/taehyunlim/shopify-erp-connector/issues"
+  },
+  "homepage": "https://github.com/taehyunlim/shopify-erp-connector#readme",
+  "dependencies": {
+    "flat": "^4.0.0",
+    "json-2-csv": "^2.2.0",
+    "json2xls": "^0.1.2",
+    "limiter": "^1.1.2",
+    "moment": "^2.21.0",
+    "mongoose": "^5.0.11",
+    "path": "^0.12.7",
+    "request": "^2.85.0"
+  }
+}
