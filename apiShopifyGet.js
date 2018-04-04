@@ -51,7 +51,7 @@ function truncateToCent(value) {
 var promiseGetOrders = new Promise((resolve, reject) => {
 	request(
 		{
-			url: baseurl + '/admin/orders.json?financial_status=paid&limit=200',
+			url: baseurl + '/admin/orders.json',
 			json: true,
 		}, function (error, response, body) {
 			if (error) {
@@ -65,10 +65,23 @@ var promiseGetOrders = new Promise((resolve, reject) => {
 })
 
 promiseGetOrders.then((body)=>{
-	console.log("successful");
-	return (body.orders[0]["id"])
+	console.log(`successfully received ${body.orders[0]["id"]}`);
+	return (body.orders)
 }, (error) => {
 	console.log(error);
-}).then((id)=>{
-	console.log(id);
+}).then((orders)=>{
+	const orderArray = copyOrder(orders);
+	console.log(orderArray);
 })
+
+
+
+function copyOrder(orderDataArray) {
+	const orderArray = [];
+	orderDataArray.map(orderDataObject => {
+		// const order = {};
+		const { id: shopifyOrderId } = orderDataObject;
+		orderArray.push(shopifyOrderId);
+	})
+	return(orderArray);
+}
