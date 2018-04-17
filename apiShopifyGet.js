@@ -1,4 +1,4 @@
-
+/* ================ GLOBAL VARIABLES ================ */
 // Dependencies
 const fs = require('fs');
 const path = require('path');
@@ -9,15 +9,13 @@ const moment = require('moment');
 const Bottleneck = require("bottleneck");
 const limiter = new Bottleneck({maxConcurrent: 3, minTime: 500});
 
-// Import local config files
-const config = require('./config.js');
-
 // Shopify API Credential
+const config = require('./config.js');
 const apikey = config.shopify_api_key_dev;
 const password = config.shopify_api_pw_dev;
 const shopname = config.shopify_shopname_dev;
 
-// Database setup
+// Database Setup
 const mongoose = require('mongoose');
 const models = require('./Models/OrderSchema.js')
 const db = mongoose.connection;
@@ -25,7 +23,7 @@ const databaseName = 'zsdb_test';
 const dbURI = `mongodb://localhost:27017/${databaseName}`;
 mongoose.Promise = global.Promise;
 
-// Global variables
+// API & File System Write Related
 const baseurl = `https://${apikey}:${password}@${shopname}.myshopify.com`;
 const dateString = moment().format("YYYYMMDD");
 const dateTimeString = moment().format("YYYYMMDD_HHmm");
@@ -33,7 +31,10 @@ const savePathName = `./OrderImport/${dateString}`;
 const saveFileName = `ShopifyAPI_Orders_${dateTimeString}.xlsx`;
 const importFileName = `OE_NewOrder_${dateTimeString}}_ZINUS.xlsx`;
 const currentFileName = path.basename(__filename);
+/* =================================================== */
 
+
+/* ================ UTILITY FUNCTIONS ================ */
 // System log (Saved under [./savePathName/dateString/])
 const sysLogFile = `systemLog_${dateTimeString}.txt`;
 const sysLogBody = `\r\n@${dateTimeString}[${currentFileName}] >>> `;
@@ -55,12 +56,15 @@ const truncateToCent = (value) => {
 	return Number(Math.floor(value * 100) / 100);
 }
 
-process.on('unhandledRejection', (reason, p) => {
-	console.log('Unhandled Rejection at: Promise', p, 'reason:', reason);
-	systemLog('Unhandled Rejection at: Promise', p, 'reason:', reason);
+// Unhandled Rejection
+process.on('unhandledRejection', error => {
+	systemLog('Unhandled Rejection at:', error);
 });
+/* =================================================== */
 
-// Recall last imported orderId
+
+/* ================ DECLARE FUNCTIONS ================ */
+// A promise to recall the last imported orderId
 const recallPromise = new Promise((resolve, reject) => {
 
 	mongoose.connect(dbURI)
@@ -100,10 +104,52 @@ const recallPromise = new Promise((resolve, reject) => {
 
 });
 
+// A promise to send request to Shopify API server
+const getOrdersPromise = (latestOrderId) => {
+
+	return new Promise((resolve, reject) => {
+		request({
+			url: baseurl + `/admin/orders.json?since_id=${latestOrderId}`,
+			// url: baseurl + `/admin/orders.json?since_id=9999999999999`,
+			json: true,
+		}, function (error, response, body) {
+			if (error) throw error;
+			if (!error && response.statusCode === 200) {
+				if (body.orders) {
+					if (body.orders.length === 0) {
+						systemLog(`No order received since lastestOrderId: ${latestOrderId}`);
+					} else {
+						systemLog(`ORDERS ARRAY LENGTH: ${body.orders.length}`);
+						resolve(body.orders);
+					}
+				} else {
+					systemLog(`Response returned with exception body: \r\n${JSON.stringify(body)}`);
+				}
+			} else if (!error && response.statusCode !== 200) {
+				systemLog(`Response returned with Status Code: ${response.statusCode}`);
+			}
+		})
+	});
+
+}
+
+/* =================================================== */
+
+
+/* ================ EXECUTE FUNCTIONS ================ */
+
+
 // Resolve the recallPromise
-recallPromise.then(result => {
-	systemLog(result);
-})
+recallPromise.then(latestOrderId => {
+	systemLog(`LATEST ORDER ID: ${latestOrderId}`);
+	return getOrdersPromise(latestOrderId);
+}).then(orders => {
+	orders.forEach(order => {
+		console.log(order.id);
+	});
+}).catch(error => { systemLog(error) });
+
+/* =================================================== */
 
 // const promiseGetOrders = new Promise((resolve, reject) => {
 // 	request(
