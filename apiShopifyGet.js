@@ -3,7 +3,8 @@
 const fs = require('fs');
 const path = require('path');
 const request = require('request');
-const XLSX = require('xlsx')
+const XLSX = require('xlsx');
+const ExcelWriter = require('node-excel-stream').ExcelWriter; 
 const flatten = require('flat');
 const moment = require('moment');
 const Bottleneck = require("bottleneck");
@@ -29,7 +30,7 @@ const dateString = moment().format("YYYYMMDD");
 const dateTimeString = moment().format("YYYYMMDD_HHmm");
 const savePathName = `./OrderImport/${dateString}`;
 const saveFileName = `ShopifyAPI_Orders_${dateTimeString}.xlsx`;
-const importFileName = `OE_NewOrder_${dateTimeString}}_ZINUS.xlsx`;
+const importFileName = `OE_NewOrder_${dateTimeString}_ZINUS.xlsx`;
 const currentFileName = path.basename(__filename);
 /* =================================================== */
 
@@ -57,8 +58,8 @@ const truncateToCent = (value) => {
 }
 
 // Unhandled Rejection
-process.on('unhandledRejection', error => {
-	systemLog('Unhandled Rejection at:', error);
+process.on('unhandledRejection', (error, p) => {
+	systemLog(`Unhandled Rejection at: ${error} \r\n ${p}`);
 });
 /* =================================================== */
 
@@ -133,59 +134,116 @@ const getOrdersPromise = (latestOrderId) => {
 
 }
 
+// Output columns
+const excelCols = ['id', 'order_number', 'total_price', 'total_line_items_price', 'subtotal_price', 'total_tax', 'total_discounts', 'line_items_index', 'sku', 'product_id', 'variant_id', 'quantity', 'price', 'discount_code_0'];
+
+//  Transform order data for OMP fields (Map to be included in the source code)
+const transformOrder = (orders) => {
+	ordersArray = [];
+	for (let i = 0; i < orders.length; i++) {
+		let order = orders[i];
+		order['discount_code_0'] = (order.discount_codes.length > 0) ? order.discount_codes[0]['code'] : '';
+		let line_items = order['line_items']
+		for (let j = 0; j < line_items.length; j++) {
+			let orderCopy = Object.assign({
+				'line_items_index': j+1,
+				'sku': line_items[j].sku,
+				'product_id': line_items[j].product_id,
+				'variant_id': line_items[j].variant_id,
+				'quantity': line_items[j].quantity,
+				'price': line_items[j].price
+			}, order);
+			ordersArray.push(orderCopy);
+		}
+	}
+	return ordersArray;
+}
+
+
+// for (let j = 0; j < orders[i]['line_items'].length; j++) {
+// 	orders[i]['line_items_index'] = j + 1;
+// 	orders.push(orders[i]);
+// }
+
+// Delcare a stream object for ExcelWriter and specify data cols & rows
+let ExcelWriteStream = new ExcelWriter({
+	sheets: [{
+		key: 'OE_NewOrder',
+		headers: [
+			{ name: excelCols[0], key: excelCols[0] },
+			{ name: excelCols[1], key: excelCols[1] },
+			{ name: excelCols[2], key: excelCols[2] },
+			{ name: excelCols[3], key: excelCols[3] },
+			{ name: excelCols[4], key: excelCols[4] },
+			{ name: excelCols[5], key: excelCols[5] },
+			{ name: excelCols[6], key: excelCols[6] },
+			{ name: excelCols[7], key: excelCols[7] },
+			{ name: excelCols[8], key: excelCols[8] },
+			{ name: excelCols[9], key: excelCols[9] },
+			{ name: excelCols[10], key: excelCols[10] },
+			{ name: excelCols[11], key: excelCols[11] },
+			{ name: excelCols[12], key: excelCols[12] },
+			{ name: excelCols[13], key: excelCols[13] },
+		]
+	}]
+});
+
+// Map each order object to promise object in the promisesArray
+const ExcelStreamPromiseArray = (orders) => {
+	const promisesArray = orders.map((e) => {
+		// Break down each order object property to its corresponding column
+		let excelInput = {
+			[excelCols[0]]: e[excelCols[0]],
+			[excelCols[1]]: e[excelCols[1]],
+			[excelCols[2]]: e[excelCols[2]],
+			[excelCols[3]]: e[excelCols[3]],
+			[excelCols[4]]: e[excelCols[4]],
+			[excelCols[5]]: e[excelCols[5]],
+			[excelCols[6]]: e[excelCols[6]],
+			[excelCols[7]]: e[excelCols[7]],
+			[excelCols[8]]: e[excelCols[8]],
+			[excelCols[9]]: e[excelCols[9]],
+			[excelCols[10]]: e[excelCols[10]],
+			[excelCols[11]]: e[excelCols[11]],
+			[excelCols[12]]: e[excelCols[12]],
+			[excelCols[13]]: e[excelCols[13]],
+		};
+		ExcelWriteStream.addData('OE_NewOrder', excelInput);
+	});
+	return promisesArray;
+}
 /* =================================================== */
 
 
+
+
 /* ================ EXECUTE FUNCTIONS ================ */
-
-
 // Resolve the recallPromise
 recallPromise.then(latestOrderId => {
 	systemLog(`LATEST ORDER ID: ${latestOrderId}`);
 	return getOrdersPromise(latestOrderId);
 }).then(orders => {
-	orders.forEach(order => {
-		console.log(order.id);
-	});
+	// orders.forEach(order => {
+	// 	order.line_items.forEach(line_item => {
+	// 		console.log(line_item);
+	// 	})
+	// });
+	
+	// Return an array of promises from ExcelWriter
+	return ExcelStreamPromiseArray(transformOrder(orders));
+}).then((promisesArray) => {
+	Promise.all(promisesArray)
+		.then(() => { return ExcelWriteStream.save(); })
+		.then((stream) => { 
+			stream.pipe(fs.createWriteStream(`./${savePathName}/${importFileName}`)) 
+		})
+		.then(() => { systemLog(`ExcelWriteStream successfually saved at: ${savePathName}`) });
 }).catch(error => { systemLog(error) });
+
+
 
 /* =================================================== */
 
-// const promiseGetOrders = new Promise((resolve, reject) => {
-// 	request(
-// 		{
-// 			url: baseurl + '/admin/orders.json',
-// 			json: true,
-// 		}, function (error, response, body) {
-// 			if (error) {
-// 				reject (error);
-// 			}
-// 			else {
-// 				resolve(body);
-// 			}
-// 		}
-// 	)
-// })
-
-// promiseGetOrders
-// .then((body) => {
-// 	systemLog(`successfully received ${body.orders[0]["id"]}`);
-// 	systemLog(truncateToCent(body.orders[0]["subtotal_price"]));
-// 	return (body.orders);
-// })
-// .catch( (error) => {
-// 	systemLog(error);
-// })
-// .then( (orders) => {
-// 	const orderArray = copyOrder(orders);
-// 	return (orderArray);
-// })
-// .catch((error) => {
-// 	systemLog(error);
-// })
-// .then( (orderArray) => {
-// 	systemLog(orderArray);
-// })
 
 
 // function copyOrder(orderDataArray) {
