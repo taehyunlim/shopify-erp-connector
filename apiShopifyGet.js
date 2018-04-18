@@ -98,8 +98,7 @@ const recallPromise = new Promise((resolve, reject) => {
 		// Resolve dbPromise with the recalled latest order id
 		dbPromise.then((latestOrderId) => {
 			resolve(latestOrderId);
-		}).then(() => {
-			db.close();
+			db.close();			
 		}).catch(error => { systemLog(error) })
 	})
 
@@ -222,13 +221,7 @@ const ExcelStreamPromiseArray = (orders) => {
 recallPromise.then(latestOrderId => {
 	systemLog(`LATEST ORDER ID: ${latestOrderId}`);
 	return getOrdersPromise(latestOrderId);
-}).then(orders => {
-	// orders.forEach(order => {
-	// 	order.line_items.forEach(line_item => {
-	// 		console.log(line_item);
-	// 	})
-	// });
-	
+}).then(orders => {	
 	// Return an array of promises from ExcelWriter
 	return ExcelStreamPromiseArray(transformOrder(orders));
 }).then((promisesArray) => {
