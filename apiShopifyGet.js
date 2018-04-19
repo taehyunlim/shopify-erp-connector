@@ -52,7 +52,7 @@ const systemLog = (log) => {
 	}
 }());
 
-// Rounding for discount calcuation
+// Rounding for cent calcuation
 const truncateToCent = (value) => {
 	return Number(Math.floor(value * 100) / 100);
 }
@@ -134,10 +134,10 @@ const getOrdersPromise = (latestOrderId) => {
 }
 
 // Output columns
-let excelCols = ['order_index', 'id', 'order_number', 'contact_email', 'created_at', 'total_price', 'total_line_items_price', 'subtotal_price', 'total_tax', 'total_discounts', 'line_items_index', 'sku', 'product_id', 'variant_id', 'quantity', 'price'];
+let excelCols = ['order_index', 'id', 'order_number', 'contact_email', 'created_at', 'total_price', 'total_line_items_price', 'subtotal_price', 'total_tax', 'total_discounts'];
 
 // Below columns need data transformation: transformOrder
-excelCols = excelCols.concat(['zinus_po', 'discount_code_0', 'shipping_address_name', 'shipping_address_address_1', 'shipping_address_address_2', 'shipping_address_city', 'shipping_address_state', 'shipping_address_zip', 'shipping_address_country', 'shipping_address_phone', 'line_items_tax_price', 'line_items_tax_rate']);
+excelCols = excelCols.concat(['zinus_po', 'discount_code_0', 'shipping_address_name', 'shipping_address_address_1', 'shipping_address_address_2', 'shipping_address_city', 'shipping_address_state', 'shipping_address_zip', 'shipping_address_country', 'shipping_address_phone','order_recycling_fee', 'line_items_index', 'line_items_sku', 'line_items_product_id', 'line_items_variant_id', 'line_items_quantity', 'line_items_price', 'line_items_discount_price', 'line_items_discount_rate', 'line_items_unit_price', 'line_items_tax_price', 'line_items_tax_rate']);
 
 // Globally scoped order index
 let order_index = 0;
@@ -160,6 +160,8 @@ const transformOrder = (orders) => {
 		order['shipping_address_zip'] = order.shipping_address.zip;
 		order['shipping_address_country'] = order.shipping_address.country;
 		order['shipping_address_phone'] = order.shipping_address.phone;
+		// Handle Recycling Fees
+		order['order_recycling_fee'] = (order.shipping_lines[0]) ? order.shipping_lines[0].discounted_price : 0;
 
 		// Handle line item object
 		let line_items = order['line_items']
@@ -171,21 +173,23 @@ const transformOrder = (orders) => {
 				line_items_tax_rate = 0;
 			if (line_items[j].tax_lines.length > 0) {
 				let line_items_tax_lines = line_items[j].tax_lines;
-				line_items_tax_price = line_items_tax_lines.reduce((sum, e) => sum + parseFloat(e["price"]), 0);
+				line_items_tax_price = truncateToCent(line_items_tax_lines.reduce((sum, e) => sum + parseFloat(e["price"]), 0));
 				line_items_tax_rate = line_items_tax_lines.reduce((sum, e) => sum + parseFloat(e["rate"]), 0);
 			};
-			console.log(line_items_tax_price);
 
 			// Clone an order object and push to the ordersArray
 			let orderCopy = Object.assign({
 				'line_items_index': j+1,
-				'sku': line_items[j].sku,
-				'product_id': line_items[j].product_id,
-				'variant_id': line_items[j].variant_id,
-				'quantity': line_items[j].quantity,
-				'price': line_items[j].price,
+				'line_items_sku': line_items[j].sku,
+				'line_items_product_id': line_items[j].product_id,
+				'line_items_variant_id': line_items[j].variant_id,
+				'line_items_quantity': line_items[j].quantity,
+				'line_items_price': line_items[j].price,
 				'line_items_tax_price': line_items_tax_price,
 				'line_items_tax_rate': line_items_tax_rate,
+				'line_items_discount_percentage': 0, // PLACEHOLDER FOR PRICERULE API
+				'line_items_discount_price': 0, // PLACEHOLDER FOR PRICERULE API
+				'line_items_unit_price': 0, // PLACEHOLDER FOR PRICERULE API
 				'order_index': order_index
 			}, order);
 			ordersArray.push(orderCopy);
