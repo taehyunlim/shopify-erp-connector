@@ -134,23 +134,59 @@ const getOrdersPromise = (latestOrderId) => {
 }
 
 // Output columns
-const excelCols = ['id', 'order_number', 'total_price', 'total_line_items_price', 'subtotal_price', 'total_tax', 'total_discounts', 'line_items_index', 'sku', 'product_id', 'variant_id', 'quantity', 'price', 'discount_code_0'];
+let excelCols = ['order_index', 'id', 'order_number', 'contact_email', 'created_at', 'total_price', 'total_line_items_price', 'subtotal_price', 'total_tax', 'total_discounts', 'line_items_index', 'sku', 'product_id', 'variant_id', 'quantity', 'price'];
+
+// Below columns need data transformation: transformOrder
+excelCols = excelCols.concat(['zinus_po', 'discount_code_0', 'shipping_address_name', 'shipping_address_address_1', 'shipping_address_address_2', 'shipping_address_city', 'shipping_address_state', 'shipping_address_zip', 'shipping_address_country', 'shipping_address_phone', 'line_items_tax_price', 'line_items_tax_rate']);
+
+// Globally scoped order index
+let order_index = 0;
 
 //  Transform order data for OMP fields (Map to be included in the source code)
 const transformOrder = (orders) => {
 	ordersArray = [];
 	for (let i = 0; i < orders.length; i++) {
 		let order = orders[i];
+		// Assign Zinus PO, which is Order # prefixed by "ZC"
+		order['zinus_po'] = "ZC" + order.order_number;
+		// Handle discount coupon code
 		order['discount_code_0'] = (order.discount_codes.length > 0) ? order.discount_codes[0]['code'] : '';
+		// Handle shipping address object
+		order['shipping_address_name'] = order.shipping_address.name;
+		order['shipping_address_address_1'] = order.shipping_address.address1;
+		order['shipping_address_address_2'] = order.shipping_address.address2;
+		order['shipping_address_city'] = order.shipping_address.city;
+		order['shipping_address_state'] = order.shipping_address.province;
+		order['shipping_address_zip'] = order.shipping_address.zip;
+		order['shipping_address_country'] = order.shipping_address.country;
+		order['shipping_address_phone'] = order.shipping_address.phone;
+
+		// Handle line item object
 		let line_items = order['line_items']
 		for (let j = 0; j < line_items.length; j++) {
+			// Increment the globally scoped Order Index 
+			order_index++;
+			// Handle nested tax object
+			let line_items_tax_price = 0,
+				line_items_tax_rate = 0;
+			if (line_items[j].tax_lines.length > 0) {
+				let line_items_tax_lines = line_items[j].tax_lines;
+				line_items_tax_price = line_items_tax_lines.reduce((sum, e) => sum + parseFloat(e["price"]), 0);
+				line_items_tax_rate = line_items_tax_lines.reduce((sum, e) => sum + parseFloat(e["rate"]), 0);
+			};
+			console.log(line_items_tax_price);
+
+			// Clone an order object and push to the ordersArray
 			let orderCopy = Object.assign({
 				'line_items_index': j+1,
 				'sku': line_items[j].sku,
 				'product_id': line_items[j].product_id,
 				'variant_id': line_items[j].variant_id,
 				'quantity': line_items[j].quantity,
-				'price': line_items[j].price
+				'price': line_items[j].price,
+				'line_items_tax_price': line_items_tax_price,
+				'line_items_tax_rate': line_items_tax_rate,
+				'order_index': order_index
 			}, order);
 			ordersArray.push(orderCopy);
 		}
@@ -158,62 +194,37 @@ const transformOrder = (orders) => {
 	return ordersArray;
 }
 
-
-// for (let j = 0; j < orders[i]['line_items'].length; j++) {
-// 	orders[i]['line_items_index'] = j + 1;
-// 	orders.push(orders[i]);
-// }
-
 // Delcare a stream object for ExcelWriter and specify data cols & rows
+let excelStreamColsArray = excelCols.map((e) => {
+	let acc = {};
+	acc.name = e;
+	acc.key = e;
+	return acc;
+})
+
 let ExcelWriteStream = new ExcelWriter({
 	sheets: [{
 		key: 'OE_NewOrder',
-		headers: [
-			{ name: excelCols[0], key: excelCols[0] },
-			{ name: excelCols[1], key: excelCols[1] },
-			{ name: excelCols[2], key: excelCols[2] },
-			{ name: excelCols[3], key: excelCols[3] },
-			{ name: excelCols[4], key: excelCols[4] },
-			{ name: excelCols[5], key: excelCols[5] },
-			{ name: excelCols[6], key: excelCols[6] },
-			{ name: excelCols[7], key: excelCols[7] },
-			{ name: excelCols[8], key: excelCols[8] },
-			{ name: excelCols[9], key: excelCols[9] },
-			{ name: excelCols[10], key: excelCols[10] },
-			{ name: excelCols[11], key: excelCols[11] },
-			{ name: excelCols[12], key: excelCols[12] },
-			{ name: excelCols[13], key: excelCols[13] },
-		]
+		headers: excelStreamColsArray
 	}]
 });
+
+
 
 // Map each order object to promise object in the promisesArray
 const ExcelStreamPromiseArray = (orders) => {
 	const promisesArray = orders.map((e) => {
 		// Break down each order object property to its corresponding column
-		let excelInput = {
-			[excelCols[0]]: e[excelCols[0]],
-			[excelCols[1]]: e[excelCols[1]],
-			[excelCols[2]]: e[excelCols[2]],
-			[excelCols[3]]: e[excelCols[3]],
-			[excelCols[4]]: e[excelCols[4]],
-			[excelCols[5]]: e[excelCols[5]],
-			[excelCols[6]]: e[excelCols[6]],
-			[excelCols[7]]: e[excelCols[7]],
-			[excelCols[8]]: e[excelCols[8]],
-			[excelCols[9]]: e[excelCols[9]],
-			[excelCols[10]]: e[excelCols[10]],
-			[excelCols[11]]: e[excelCols[11]],
-			[excelCols[12]]: e[excelCols[12]],
-			[excelCols[13]]: e[excelCols[13]],
-		};
+		let excelInput = {};
+		excelCols.map((el) => {
+			excelInput[el] = e[el];
+		});
+		// Add excelInput obejct to the write stream
 		ExcelWriteStream.addData('OE_NewOrder', excelInput);
 	});
 	return promisesArray;
 }
 /* =================================================== */
-
-
 
 
 /* ================ EXECUTE FUNCTIONS ================ */
