@@ -18,7 +18,7 @@ const shopname = config.shopify_shopname_dev;
 
 // Database Setup
 const mongoose = require('mongoose');
-const models = require('./Models/OrderSchema.js')
+const models = require('./Models/OrderSchema.js');
 const db = mongoose.connection;
 const databaseName = 'zsdb_test';
 const dbURI = `mongodb://localhost:27017/${databaseName}`;
@@ -32,6 +32,11 @@ const savePathName = `./OrderImport/${dateString}`;
 const saveFileName = `ShopifyAPI_Orders_${dateTimeString}.xlsx`;
 const importFileName = `OE_NewOrder_${dateTimeString}_ZINUS.xlsx`;
 const currentFileName = path.basename(__filename);
+
+// Discount Related
+const jsonQuery = require('json-query');
+const zinusapiUrl = 'http://52.160.69.254:3000/discount/map';
+var dcResult;
 /* =================================================== */
 
 
@@ -90,7 +95,7 @@ const recallPromise = new Promise((resolve, reject) => {
 						// CASE 2-1: There is a closed order --> Resolve the latest closed order id
 						if (result[0]) { resolve(result[0].shopify_order_id) }
 						// CASE 2-2: There is no closed order --> Resolve with a base value (shopify_order_id = 0)
-						else { resolve(null)	}
+						else { resolve(1000)	}
 					})
 				}
 			})
@@ -133,6 +138,30 @@ const getOrdersPromise = (latestOrderId) => {
 
 }
 
+// A promise to send request to Zinus API server
+const getDiscountPromise = new Promise((resolve, reject) => {
+	request({
+		url: zinusapiUrl,
+		json: true,
+	}, function (error, response, body) {
+		if (error) throw error;
+		if (!error && response.statusCode === 200) {
+			if (body.dclist) {
+				if (body.dclist.length === 0) {
+					systemLog(`No dclist received`);
+				} else {
+					systemLog(`Dicount ARRAY LENGTH: ${body.dclist.length}`);
+					resolve(body);
+				}
+			} else {
+				systemLog(`Response returned with exception body: \r\n${JSON.stringify(body)}`);
+			}
+		} else if (!error && response.statusCode !== 200) {
+			systemLog(`Response returned with Status Code: ${response.statusCode}`);
+		}
+	})
+});
+
 // Output columns
 let excelCols = ['order_index', 'id', 'order_number', 'contact_email', 'created_at', 'total_price', 'total_line_items_price', 'subtotal_price', 'total_tax', 'total_discounts'];
 
@@ -162,7 +191,7 @@ const transformOrder = (orders) => {
 		order['shipping_address_phone'] = order.shipping_address.phone;
 		// Handle Recycling Fees
 		order['order_recycling_fee'] = (order.shipping_lines[0]) ? order.shipping_lines[0].discounted_price : 0;
-
+		var dicount_code = (order.discount_codes.length > 0) ? order.discount_codes[0]['code'] : '';
 		// Handle line item object
 		let line_items = order['line_items']
 		for (let j = 0; j < line_items.length; j++) {
@@ -177,6 +206,21 @@ const transformOrder = (orders) => {
 				line_items_tax_rate = line_items_tax_lines.reduce((sum, e) => sum + parseFloat(e["rate"]), 0);
 			};
 
+			// Discount Map Search
+			//systemLog('dicount_code: '+ dicount_code);
+			let dc_percent = 0;
+			if(dicount_code != null && dicount_code != ""){
+				//systemLog('product_id: '+ line_items[j].product_id);
+				//systemLog('variant_id: '+ line_items[j].variant_id);
+				let dc_qry1 = jsonQuery(['dclist[* title=? & products~? | variants~?].value', dicount_code, line_items[j].product_id, line_items[j].variant_id],{data:dcResult});
+				if(dc_qry1.value != null && dc_qry1.value.length > 0){	//
+					dc_percent = parseInt(dc_qry1.value);
+					systemLog('DC_VALUE: '+ JSON.stringify(dc_percent));
+				}
+			}
+			let dc_price = (dc_percent/100) * parseFloat(line_items[j].price);
+			let dc_uprice = parseFloat(line_items[j].price) + dc_price;
+
 			// Clone an order object and push to the ordersArray
 			let orderCopy = Object.assign({
 				'line_items_index': j+1,
@@ -187,14 +231,15 @@ const transformOrder = (orders) => {
 				'line_items_price': line_items[j].price,
 				'line_items_tax_price': line_items_tax_price,
 				'line_items_tax_rate': line_items_tax_rate,
-				'line_items_discount_percentage': 0, // PLACEHOLDER FOR PRICERULE API
-				'line_items_discount_price': 0, // PLACEHOLDER FOR PRICERULE API
-				'line_items_unit_price': 0, // PLACEHOLDER FOR PRICERULE API
+				'line_items_discount_rate': dc_percent, // PLACEHOLDER FOR PRICERULE API
+				'line_items_discount_price': dc_price, // PLACEHOLDER FOR PRICERULE API
+				'line_items_unit_price': dc_uprice, // PLACEHOLDER FOR PRICERULE API
 				'order_index': order_index
 			}, order);
 			ordersArray.push(orderCopy);
 		}
 	}
+	//systemLog(JSON.stringify(dcResult));
 	return ordersArray;
 }
 // version test
@@ -232,8 +277,26 @@ const ExcelStreamPromiseArray = (orders) => {
 
 
 /* ================ EXECUTE FUNCTIONS ================ */
+Promise.all([getDiscountPromise, recallPromise]).then(function (values) {
+	//systemLog(`DISCOUNT: ${values[0]}`);
+	dcResult = values[0];
+	//dclistArray = values[1];
+	systemLog(`LATEST ORDER ID: ${values[1]}`);
+	return getOrdersPromise(values[1]);
+}).then(orders => {	
+	// Return an array of promises from ExcelWriter
+	return ExcelStreamPromiseArray(transformOrder(orders));
+}).then((promisesArray) => {
+	Promise.all(promisesArray)
+		.then(() => { return ExcelWriteStream.save(); })
+		.then((stream) => { 
+			stream.pipe(fs.createWriteStream(`./${savePathName}/${importFileName}`)) 
+		})
+		.then(() => { systemLog(`ExcelWriteStream successfually saved at: ${savePathName}`) });
+}).catch(error => { systemLog(error) });
+
 // Resolve the recallPromise
-recallPromise.then(latestOrderId => {
+/* recallPromise.then(latestOrderId => {
 	systemLog(`LATEST ORDER ID: ${latestOrderId}`);
 	return getOrdersPromise(latestOrderId);
 }).then(orders => {	
@@ -246,7 +309,7 @@ recallPromise.then(latestOrderId => {
 			stream.pipe(fs.createWriteStream(`./${savePathName}/${importFileName}`)) 
 		})
 		.then(() => { systemLog(`ExcelWriteStream successfually saved at: ${savePathName}`) });
-}).catch(error => { systemLog(error) });
+}).catch(error => { systemLog(error) }); */
 
 
 
