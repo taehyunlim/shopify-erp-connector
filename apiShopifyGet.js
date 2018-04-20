@@ -165,7 +165,7 @@ const getDiscountPromise = new Promise((resolve, reject) => {
 		}
 	})
 });
-
+ 
 // Output columns
 let excelCols = ['order_index', 'id', 'order_number', 'contact_email', 'created_at', 'total_price', 'total_line_items_price', 'subtotal_price', 'total_tax', 'total_discounts'];
 
