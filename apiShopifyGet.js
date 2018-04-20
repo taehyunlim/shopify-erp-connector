@@ -36,6 +36,11 @@ const currentFileName = path.basename(__filename);
 
 
 /* ================ UTILITY FUNCTIONS ================ */
+// Uniform timestamp
+const timestamp = (timeObject) => {
+	return moment(timeObject).format("YYYYMMDD_HHmm");
+}
+
 // System log (Saved under [./savePathName/dateString/])
 const sysLogFile = `systemLog_${dateTimeString}.txt`;
 const sysLogBody = `\r\n@${dateTimeString}[${currentFileName}] >>> `;
@@ -136,14 +141,14 @@ const getOrdersPromise = (latestOrderId) => {
 // Output columns
 let excelCols = ['order_index', 'id', 'order_number', 'contact_email', 'created_at', 'total_price', 'total_line_items_price', 'subtotal_price', 'total_tax', 'total_discounts'];
 
-// Below columns need data transformation: transformOrder
+// Below columns need data transformation: transformOrderExcel
 excelCols = excelCols.concat(['zinus_po', 'discount_code_0', 'shipping_address_name', 'shipping_address_address_1', 'shipping_address_address_2', 'shipping_address_city', 'shipping_address_state', 'shipping_address_zip', 'shipping_address_country', 'shipping_address_phone','order_recycling_fee', 'line_items_index', 'line_items_sku', 'line_items_product_id', 'line_items_variant_id', 'line_items_quantity', 'line_items_price', 'line_items_discount_price', 'line_items_discount_rate', 'line_items_unit_price', 'line_items_tax_price', 'line_items_tax_rate']);
 
 // Globally scoped order index
 let order_index = 0;
 
 //  Transform order data for OMP fields (Map to be included in the source code)
-const transformOrder = (orders) => {
+const transformOrderExcel = (orders) => {
 	ordersArray = [];
 	for (let i = 0; i < orders.length; i++) {
 		let order = orders[i];
@@ -199,10 +204,10 @@ const transformOrder = (orders) => {
 }
 
 // Delcare a stream object for ExcelWriter and specify data cols & rows
-let excelStreamColsArray = excelCols.map((e) => {
+let excelStreamColsArray = excelCols.map((val) => {
 	let acc = {};
-	acc.name = e;
-	acc.key = e;
+	acc.name = val;
+	acc.key = val;
 	return acc;
 })
 
@@ -213,21 +218,50 @@ let ExcelWriteStream = new ExcelWriter({
 	}]
 });
 
-
-
 // Map each order object to promise object in the promisesArray
-const ExcelStreamPromiseArray = (orders) => {
-	const promisesArray = orders.map((e) => {
+const ExcelStreamPromiseArray = (ordersExcel) => {
+	const promisesArray = ordersExcel.map((order) => {
 		// Break down each order object property to its corresponding column
 		let excelInput = {};
-		excelCols.map((el) => {
-			excelInput[el] = e[el];
+		excelCols.map((prop) => {
+			excelInput[prop] = order[prop];
 		});
 		// Add excelInput obejct to the write stream
 		ExcelWriteStream.addData('OE_NewOrder', excelInput);
 	});
 	return promisesArray;
 }
+
+const mongoProps = ['shopify_order_id', 'status', 'date_ordered_shopify', 'date_ordered_sage', 'date_received', 'date_imported', 'date_fulfilled', 'date_posted', 'shopify_po', 'zinus_po', 'sage_order_number', 'm_tracking_no', 'tracking_no', 'company', 'wh_code', 'cancelled', 'posted', 'closed'];
+
+// Transform order data for MongoDB 
+const transformOrderMongo = ((orders) => {
+	return orders.map((order) => {
+		let entry = {};
+		entry['shopify_order_id'] = order.id;
+		entry['status'] = 'received';
+		entry['date_ordered_shopify'] = timestamp(order.created_at);
+		entry['date_ordered_sage'] = '';
+		entry['date_received'] = dateTimeString;
+		entry['date_imported'] = '';
+		entry['date_fulfilled'] = '';
+		entry['date_posted'] = '';
+		entry['shopify_po'] = String(order.order_number);
+		entry['zinus_po'] = 'ZC' + String(order.order_number);
+		entry['sage_order_number'] = '';
+		entry['m_tracking_no'] = '';
+		entry['tracking_no'] = '';
+		entry['company'] = '';
+		entry['wh_code'] = '';
+		entry['cancelled'] = false;
+		entry['posted'] = false;
+		entry['closed'] = false;
+		return entry;
+	})
+}) 
+
+
+
 /* =================================================== */
 
 
@@ -237,8 +271,14 @@ recallPromise.then(latestOrderId => {
 	systemLog(`LATEST ORDER ID: ${latestOrderId}`);
 	return getOrdersPromise(latestOrderId);
 }).then(orders => {	
+	// DEV ONLY: Print array for MongoDB entry
+	const ordersMongo = transformOrderMongo(orders);
+	console.log(ordersMongo);
+
 	// Return an array of promises from ExcelWriter
-	return ExcelStreamPromiseArray(transformOrder(orders));
+	const ordersExcel = transformOrderExcel(orders);
+	return ExcelStreamPromiseArray(ordersExcel);
+
 }).then((promisesArray) => {
 	Promise.all(promisesArray)
 		.then(() => { return ExcelWriteStream.save(); })
@@ -246,7 +286,10 @@ recallPromise.then(latestOrderId => {
 			stream.pipe(fs.createWriteStream(`./${savePathName}/${importFileName}`)) 
 		})
 		.then(() => { systemLog(`ExcelWriteStream successfually saved at: ${savePathName}`) });
-}).catch(error => { systemLog(error) });
+}).then(() => {
+	console.log("recallPromise done");
+})
+.catch(error => { systemLog(error) });
 
 
 
