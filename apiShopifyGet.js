@@ -31,6 +31,11 @@ const savePathName = `./OrderImport/${dateString}`;
 const saveFileName = `ShopifyAPI_Orders_${dateTimeString}.xlsx`;
 const importFileName = `OE_NewOrder_${dateTimeString}_ZINUS.xlsx`;
 const currentFileName = path.basename(__filename);
+
+// Discount Related
+const jsonQuery = require('json-query');
+const zinusapiUrl = 'http://52.160.69.254:3000/discount/map';
+var dcResult;
 /* =================================================== */
 
 
@@ -136,6 +141,30 @@ const getOrdersPromise = (latestOrderId) => {
 	});
 	
 }
+
+// A promise to send request to Zinus API server
+const getDiscountPromise = new Promise((resolve, reject) => {
+	request({
+		url: zinusapiUrl,
+		json: true,
+	}, function (error, response, body) {
+		if (error) throw error;
+		if (!error && response.statusCode === 200) {
+			if (body.dclist) {
+				if (body.dclist.length === 0) {
+					systemLog(`No dclist received`);
+				} else {
+					systemLog(`Dicount ARRAY LENGTH: ${body.dclist.length}`);
+					resolve(body);
+				}
+			} else {
+				systemLog(`Response returned with exception body: \r\n${JSON.stringify(body)}`);
+			}
+		} else if (!error && response.statusCode !== 200) {
+			systemLog(`Response returned with Status Code: ${response.statusCode}`);
+		}
+	})
+});
 
 // Output columns
 let excelCols = ['order_index', 'id', 'order_number', 'contact_email', 'created_at', 'total_price', 'total_line_items_price', 'subtotal_price', 'total_tax', 'total_discounts'];
