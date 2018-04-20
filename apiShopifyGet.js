@@ -19,7 +19,6 @@ const shopname = config.shopify_shopname_dev;
 // Database Setup
 const mongoose = require('mongoose');
 const models = require('./Models/OrderSchema.js')
-const db = mongoose.connection;
 const databaseName = 'zsdb_test';
 const dbURI = `mongodb://localhost:27017/${databaseName}`;
 mongoose.Promise = global.Promise;
@@ -72,15 +71,16 @@ process.on('unhandledRejection', (error, p) => {
 /* ================ DECLARE FUNCTIONS ================ */
 // A promise to recall the last imported orderId
 const recallPromise = new Promise((resolve, reject) => {
-
+	const db = mongoose.connection;
 	mongoose.connect(dbURI)
-	.catch(error => systemLog(error) )
+	.catch(error => systemLog(error))
 	.then(() => {
+		// Set Mongoose models as constant variables 
 		const openOrder = models.OpenOrders,
 					closedOrder = models.ClosedOrders,
 					pendingOrder = models.PendingOrders;
 		// Create a promise object that resolves with the latest Shopify order id, if any
-		const dbPromise = new Promise((resolve, reject) => {
+		const dbFindPromise = new Promise((resolve, reject) => {
 			////// DEV NOTE: CHANGE QUERY TO SORTY BY date_ordered_shopify AFTER REFORMATTING ITS STRING VALUE AT IMPORT //////
 			let query = { "date_received": -1, "shopify_po": -1, "date_ordered_shopify": -1 };
 			// First check if there are any open orders
@@ -95,23 +95,22 @@ const recallPromise = new Promise((resolve, reject) => {
 						// CASE 2-1: There is a closed order --> Resolve the latest closed order id
 						if (result[0]) { resolve(result[0].shopify_order_id) }
 						// CASE 2-2: There is no closed order --> Resolve with a base value (shopify_order_id = 0)
-						else { resolve(null)	}
+						else { resolve(null) }
 					})
 				}
 			})
 		});
-		// Resolve dbPromise with the recalled latest order id
-		dbPromise.then((latestOrderId) => {
+		// Resolve dbFindPromise with the recalled latest order id
+		dbFindPromise.then((latestOrderId) => {
 			resolve(latestOrderId);
-			db.close();			
-		}).catch(error => { systemLog(error) })
+			db.close();
+		}).catch(error => systemLog(error) )
 	})
 
 });
 
 // A promise to send request to Shopify API server
 const getOrdersPromise = (latestOrderId) => {
-
 	return new Promise((resolve, reject) => {
 		request({
 			url: baseurl + `/admin/orders.json?since_id=${latestOrderId}`,
@@ -135,7 +134,7 @@ const getOrdersPromise = (latestOrderId) => {
 			}
 		})
 	});
-
+	
 }
 
 // Output columns
@@ -232,6 +231,7 @@ const ExcelStreamPromiseArray = (ordersExcel) => {
 	return promisesArray;
 }
 
+// Property names for order data within MongoDB document colleciton (OpenOrders)
 const mongoProps = ['shopify_order_id', 'status', 'date_ordered_shopify', 'date_ordered_sage', 'date_received', 'date_imported', 'date_fulfilled', 'date_posted', 'shopify_po', 'zinus_po', 'sage_order_number', 'm_tracking_no', 'tracking_no', 'company', 'wh_code', 'cancelled', 'posted', 'closed'];
 
 // Transform order data for MongoDB 
@@ -260,6 +260,47 @@ const transformOrderMongo = ((orders) => {
 	})
 }) 
 
+// Insert transformed orders to MongoDB using Mongoose ORM
+const dbInsert = ((ordersMongo) => {
+	const db = mongoose.connection;
+	mongoose.connect(dbURI)
+		.catch(error => systemLog(error))
+		.then(() => {
+			// Set Mongoose models as constant variables 
+			const openOrder = models.OpenOrders,
+				closedOrder = models.ClosedOrders,
+				pendingOrder = models.PendingOrders;
+			// Create a promise object 
+			const dbInsertPromise = new Promise((resolve, reject) => {
+				// Initialize a bulk operation using Mongoose bulk object
+				let bulk = openOrder.collection.initializeOrderedBulkOp();
+				let bulkCounter = 0;
+				// Run a bulk upsert operation
+				for (let i = 0; i < ordersMongo.length; i++) {
+					let order = ordersMongo[i];
+					let query = { shopify_order_id: order.shopify_order_id};
+					bulk.find(query).upsert().updateOne(order);
+					bulkCounter++;
+					// Exit condition
+					if (bulkCounter === ordersMongo.length) {
+						bulk.execute((error, result) => {
+							if (error) throw (err);
+							resolve(result);
+						});
+					}
+				}
+			});
+			// Resolve dbInsertPromise with the result from the bulk operation
+			dbInsertPromise.then((result) => {
+				if (result["ok"] === 1) {
+					systemLog(`[MongoDB] Successfully performed bulk operation with ${result["nUpserted"]} upserted; ${result["nMatched"]} matched; ${result["nModified"]} modified`);
+				} else {
+					systemLog(JSON.stringify(result));
+				}
+				db.close();
+			}).catch(error => systemLog(error));
+		})
+})
 
 
 /* =================================================== */
@@ -271,9 +312,9 @@ recallPromise.then(latestOrderId => {
 	systemLog(`LATEST ORDER ID: ${latestOrderId}`);
 	return getOrdersPromise(latestOrderId);
 }).then(orders => {	
-	// DEV ONLY: Print array for MongoDB entry
+	// Transform and insert orders
 	const ordersMongo = transformOrderMongo(orders);
-	console.log(ordersMongo);
+	dbInsert(ordersMongo);
 
 	// Return an array of promises from ExcelWriter
 	const ordersExcel = transformOrderExcel(orders);
@@ -285,24 +326,7 @@ recallPromise.then(latestOrderId => {
 		.then((stream) => { 
 			stream.pipe(fs.createWriteStream(`./${savePathName}/${importFileName}`)) 
 		})
-		.then(() => { systemLog(`ExcelWriteStream successfually saved at: ${savePathName}`) });
-}).then(() => {
-	console.log("recallPromise done");
-})
-.catch(error => { systemLog(error) });
-
-
+		.then(() => systemLog(`[Excel] ExcelWriteStream successfually saved at: ${savePathName}`));
+}).catch(error => systemLog(error));
 
 /* =================================================== */
-
-
-
-// function copyOrder(orderDataArray) {
-// 	const orderArray = [];
-// 	orderDataArray.map(orderDataObject => {
-// 		// const order = {};
-// 		const { id: shopifyOrderId } = orderDataObject;
-// 		orderArray.push(shopifyOrderId);
-// 	})
-// 	return(orderArray);
-// }
