@@ -143,6 +143,9 @@ let excelCols = ['order_index', 'id', 'order_number', 'contact_email', 'created_
 // Below columns need data transformation: transformOrderExcel
 excelCols = excelCols.concat(['zinus_po', 'discount_code_0', 'shipping_address_name', 'shipping_address_address_1', 'shipping_address_address_2', 'shipping_address_city', 'shipping_address_state', 'shipping_address_zip', 'shipping_address_country', 'shipping_address_phone','order_recycling_fee', 'line_items_index', 'line_items_sku', 'line_items_product_id', 'line_items_variant_id', 'line_items_quantity', 'line_items_price', 'line_items_discount_price', 'line_items_discount_rate', 'line_items_unit_price', 'line_items_tax_price', 'line_items_tax_rate']);
 
+// OMP columns
+OMPCols = ['ISACONTROLNO', 'DOCUMENTNO', 'ISAID', 'SHIPTO', 'SHPNAME', 'SHPADDR1', 'SHPADDR2', 'SHPADDR3', 'SHPADDR4', 'SHPCITY', 'SHIPSTATE', 'SHPZIP', 'SHPCOUNTRY', 'SHPPHONE', 'SHPEMAIL', 'PONUMBER', 'REFERENCE', 'ORDDATE', 'TD503', 'TD505', 'TD512', 'EXPDATE', 'DELVBYDATE', 'WHCODE', 'STATUS', 'OPTORD01', 'OPTORD02', 'OPTORD03', 'OPTORD04', 'OPTORD05', 'OPTORD06', 'OPTORD07', 'OPTORD08', 'OPTORD09', 'OPTORD10', 'OPTORD11', 'OPTORD12', 'OPTORD13', 'OPTORD14', 'OPTORD15', 'LINENUM', 'ITEM', 'QTYORDERED', 'ORDUNIT', 'UNITPRICE', 'OPTITM01', 'OPTITM02', 'OPTITM03', 'OPTITM04', 'OPTITM05', 'OPTITM06', 'OPTITM07', 'OPTITM08', 'OPTITM09', 'OPTITM10', 'IMPORTTIME', 'REASONCODE'];
+
 // Globally scoped order index
 let order_index = 0;
 
@@ -312,12 +315,14 @@ recallPromise.then(latestOrderId => {
 	systemLog(`LATEST ORDER ID: ${latestOrderId}`);
 	return getOrdersPromise(latestOrderId);
 }).then(orders => {	
-	// Transform and insert orders
+	// Transform orders for MongoDB
 	const ordersMongo = transformOrderMongo(orders);
+	// Insert order entry to MongoDB
 	dbInsert(ordersMongo);
 
-	// Return an array of promises from ExcelWriter
+	// Transform orders for Excel
 	const ordersExcel = transformOrderExcel(orders);
+	// Return an array of promises from ExcelWriter
 	return ExcelStreamPromiseArray(ordersExcel);
 
 }).then((promisesArray) => {
