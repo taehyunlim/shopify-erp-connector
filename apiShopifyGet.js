@@ -100,7 +100,8 @@ const recallPromise = new Promise((resolve, reject) => {
 						// CASE 2-1: There is a closed order --> Resolve the latest closed order id
 						if (result[0]) { resolve(result[0].shopify_order_id) }
 						// CASE 2-2: There is no closed order --> Resolve with a base value (shopify_order_id = 0)
-						else { resolve(null) }
+						//else { resolve(null) }
+						else { resolve(0) }
 					})
 				}
 			})
@@ -195,7 +196,7 @@ const transformOrderExcel = (orders) => {
 		order['shipping_address_phone'] = order.shipping_address.phone;
 		// Handle Recycling Fees
 		order['order_recycling_fee'] = (order.shipping_lines[0]) ? order.shipping_lines[0].discounted_price : 0;
-
+		var dicount_code = (order.discount_codes.length > 0) ? order.discount_codes[0]['code'] : '';
 		// Handle line item object
 		let line_items = order['line_items']
 		for (let j = 0; j < line_items.length; j++) {
@@ -210,6 +211,21 @@ const transformOrderExcel = (orders) => {
 				line_items_tax_rate = line_items_tax_lines.reduce((sum, e) => sum + parseFloat(e["rate"]), 0);
 			};
 
+			// Discount Map Search
+			//systemLog('dicount_code: '+ dicount_code);
+			let dc_percent = 0;
+			if(dicount_code != null && dicount_code != ""){
+				//systemLog('product_id: '+ line_items[j].product_id);
+				//systemLog('variant_id: '+ line_items[j].variant_id);
+				let dc_qry1 = jsonQuery(['dclist[* title=? & products~? | variants~?].value', dicount_code, line_items[j].product_id, line_items[j].variant_id],{data:dcResult});
+				if(dc_qry1.value != null && dc_qry1.value.length > 0){	//
+					dc_percent = parseInt(dc_qry1.value);
+					systemLog('DC_VALUE: '+ JSON.stringify(dc_percent));
+				}
+			}
+			let dc_price = (dc_percent/100) * parseFloat(line_items[j].price);
+			let dc_uprice = parseFloat(line_items[j].price) + dc_price;
+
 			// Clone an order object and push to the ordersArray
 			let orderCopy = Object.assign({
 				'line_items_index': j+1,
@@ -220,9 +236,9 @@ const transformOrderExcel = (orders) => {
 				'line_items_price': line_items[j].price,
 				'line_items_tax_price': line_items_tax_price,
 				'line_items_tax_rate': line_items_tax_rate,
-				'line_items_discount_percentage': 0, // PLACEHOLDER FOR PRICERULE API
-				'line_items_discount_price': 0, // PLACEHOLDER FOR PRICERULE API
-				'line_items_unit_price': 0, // PLACEHOLDER FOR PRICERULE API
+				'line_items_discount_rate': dc_percent, // PLACEHOLDER FOR PRICERULE API
+				'line_items_discount_price': dc_price, // PLACEHOLDER FOR PRICERULE API
+				'line_items_unit_price': dc_uprice, // PLACEHOLDER FOR PRICERULE API
 				'order_index': order_index
 			}, order);
 			ordersArray.push(orderCopy);
@@ -337,9 +353,15 @@ const dbInsert = ((ordersMongo) => {
 
 /* ================ EXECUTE FUNCTIONS ================ */
 // Resolve the recallPromise
-recallPromise.then(latestOrderId => {
+/* recallPromise.then(latestOrderId => {
 	systemLog(`LATEST ORDER ID: ${latestOrderId}`);
-	return getOrdersPromise(latestOrderId);
+	return getOrdersPromise(latestOrderId); */
+Promise.all([getDiscountPromise, recallPromise]).then(function (values) {
+	//systemLog(`DISCOUNT: ${values[0]}`);
+	dcResult = values[0];
+	//dclistArray = values[1];
+	systemLog(`LATEST ORDER ID: ${values[1]}`);
+	return getOrdersPromise(values[1]);	
 }).then(orders => {	
 	// Transform and insert orders
 	const ordersMongo = transformOrderMongo(orders);
