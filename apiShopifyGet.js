@@ -263,7 +263,8 @@ let ExcelWriteStream = new ExcelWriter({
 });
 
 // Map each order object to promise object in the promisesArray
-const ExcelStreamPromiseArray = (ordersExcel) => {
+const excelWriteOMP = (ordersExcel) => {
+	// Create an array of ExcelWriteStream promises
 	const promisesArray = ordersExcel.map((order) => {
 		// Break down each order object property to its corresponding column
 		let excelInput = {};
@@ -273,7 +274,13 @@ const ExcelStreamPromiseArray = (ordersExcel) => {
 		// Add excelInput obejct to the write stream
 		ExcelWriteStream.addData('OE_NewOrder', excelInput);
 	});
-	return promisesArray;
+	// Fulfill promise array
+	Promise.all(promisesArray)
+		.then(() => { return ExcelWriteStream.save(); })
+		.then((stream) => {
+			stream.pipe(fs.createWriteStream(`./${savePathName}/${importFileName}`))
+		})
+		.then(() => systemLog(`[Excel] ExcelWriteStream successfually saved at: ${savePathName}`));
 }
 
 // Property names for order data within MongoDB document colleciton (OpenOrders)
@@ -356,15 +363,8 @@ Promise.all([getDiscountPromise, recallPromise]).then(function (values) {
 
 	// Transform orders for Excel
 	const ordersExcel = transformOrderExcel(orders);
-	// Return an array of promises from ExcelWriter
-	return ExcelStreamPromiseArray(ordersExcel);
-}).then((promisesArray) => {
-	Promise.all(promisesArray)
-		.then(() => { return ExcelWriteStream.save(); })
-		.then((stream) => { 
-			stream.pipe(fs.createWriteStream(`./${savePathName}/${importFileName}`)) 
-		})
-		.then(() => systemLog(`[Excel] ExcelWriteStream successfually saved at: ${savePathName}`))
+	// Write Excel output for OMP
+	excelWriteOMP(ordersExcel);
 }).then(() => {
 	// Close connection
 	systemLog("Closing MongoDB connection with a resolved promise.");
