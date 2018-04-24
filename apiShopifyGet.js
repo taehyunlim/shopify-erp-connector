@@ -22,6 +22,10 @@ const models = require('./Models/OrderSchema.js')
 const databaseName = 'zsdb_test';
 const dbURI = `mongodb://localhost:27017/${databaseName}`;
 mongoose.Promise = global.Promise;
+// Set Mongoose models as constant variables 
+const openOrder = models.OpenOrders,
+	closedOrder = models.ClosedOrders,
+	pendingOrder = models.PendingOrders;
 
 // API & File System Write Related
 const baseurl = `https://${apikey}:${password}@${shopname}.myshopify.com`;
@@ -34,7 +38,8 @@ const currentFileName = path.basename(__filename);
 
 // Discount Related
 const jsonQuery = require('json-query');
-const zinusapiUrl = 'http://52.160.69.254:3000/discount/map';
+const dev_zinusapiUrl = 'http://52.160.69.254:3001/discount/map';
+// const zinusapiUrl = 'http://52.160.69.254:3000/discount/map';
 var dcResult;
 /* =================================================== */
 
@@ -76,16 +81,12 @@ process.on('unhandledRejection', (error, p) => {
 /* ================ DECLARE FUNCTIONS ================ */
 // A promise to recall the last imported orderId
 const recallPromise = new Promise((resolve, reject) => {
-	const db = mongoose.connection;
+	let db = mongoose.connection;
 	mongoose.connect(dbURI)
 	.catch(error => systemLog(error))
 	.then(() => {
-		// Set Mongoose models as constant variables 
-		const openOrder = models.OpenOrders,
-					closedOrder = models.ClosedOrders,
-					pendingOrder = models.PendingOrders;
 		// Create a promise object that resolves with the latest Shopify order id, if any
-		const dbFindPromise = new Promise((resolve, reject) => {
+		return new Promise((resolve, reject) => {
 			////// DEV NOTE: CHANGE QUERY TO SORTY BY date_ordered_shopify AFTER REFORMATTING ITS STRING VALUE AT IMPORT //////
 			let query = { "date_received": -1, "shopify_po": -1, "date_ordered_shopify": -1 };
 			// First check if there are any open orders
@@ -100,19 +101,15 @@ const recallPromise = new Promise((resolve, reject) => {
 						// CASE 2-1: There is a closed order --> Resolve the latest closed order id
 						if (result[0]) { resolve(result[0].shopify_order_id) }
 						// CASE 2-2: There is no closed order --> Resolve with a base value (shopify_order_id = 0)
-						//else { resolve(null) }
 						else { resolve(0) }
 					})
 				}
 			})
 		});
-		// Resolve dbFindPromise with the recalled latest order id
-		dbFindPromise.then((latestOrderId) => {
-			resolve(latestOrderId);
-			db.close();
-		}).catch(error => systemLog(error) )
-	})
-
+	}).then((latestOrderId) => {
+		// Resolve parent promise (recallPromise) with the recalled latest order id
+		resolve(latestOrderId);
+	}).catch(error => systemLog(error))
 });
 
 // A promise to send request to Shopify API server
@@ -127,16 +124,16 @@ const getOrdersPromise = (latestOrderId) => {
 			if (!error && response.statusCode === 200) {
 				if (body.orders) {
 					if (body.orders.length === 0) {
-						systemLog(`No order received since lastestOrderId: ${latestOrderId}`);
+						reject(`No order received since lastestOrderId: ${latestOrderId}`);
 					} else {
 						systemLog(`ORDERS ARRAY LENGTH: ${body.orders.length}`);
 						resolve(body.orders);
 					}
 				} else {
-					systemLog(`Response returned with exception body: \r\n${JSON.stringify(body)}`);
+					reject(`Response returned with exception body: \r\n${JSON.stringify(body)}`);
 				}
 			} else if (!error && response.statusCode !== 200) {
-				systemLog(`Response returned with Status Code: ${response.statusCode}`);
+				reject(`Response returned with Status Code: ${response.statusCode}`);
 			}
 		})
 	});
@@ -146,23 +143,23 @@ const getOrdersPromise = (latestOrderId) => {
 // A promise to send request to Zinus API server
 const getDiscountPromise = new Promise((resolve, reject) => {
 	request({
-		url: zinusapiUrl,
+		url: dev_zinusapiUrl,
 		json: true,
 	}, function (error, response, body) {
 		if (error) throw error;
 		if (!error && response.statusCode === 200) {
 			if (body.dclist) {
 				if (body.dclist.length === 0) {
-					systemLog(`No dclist received`);
+					reject(`No dclist received`);
 				} else {
 					systemLog(`Dicount ARRAY LENGTH: ${body.dclist.length}`);
 					resolve(body);
 				}
 			} else {
-				systemLog(`Response returned with exception body: \r\n${JSON.stringify(body)}`);
+				reject(`Response returned with exception body: \r\n${JSON.stringify(body)}`);
 			}
 		} else if (!error && response.statusCode !== 200) {
-			systemLog(`Response returned with Status Code: ${response.statusCode}`);
+			reject(`Response returned with Status Code: ${response.statusCode}`);
 		}
 	})
 });
@@ -310,46 +307,32 @@ const transformOrderMongo = ((orders) => {
 
 // Insert transformed orders to MongoDB using Mongoose ORM
 const dbInsert = ((ordersMongo) => {
-	const db = mongoose.connection;
-	mongoose.connect(dbURI)
-		.catch(error => systemLog(error))
-		.then(() => {
-			// Set Mongoose models as constant variables 
-			const openOrder = models.OpenOrders,
-				closedOrder = models.ClosedOrders,
-				pendingOrder = models.PendingOrders;
-			// Create a promise object 
-			const dbInsertPromise = new Promise((resolve, reject) => {
-				// Initialize a bulk operation using Mongoose bulk object
-				let bulk = openOrder.collection.initializeOrderedBulkOp();
-				let bulkCounter = 0;
-				// Run a bulk upsert operation
-				for (let i = 0; i < ordersMongo.length; i++) {
-					let order = ordersMongo[i];
-					let query = { shopify_order_id: order.shopify_order_id};
-					bulk.find(query).upsert().updateOne(order);
-					bulkCounter++;
-					// Exit condition
-					if (bulkCounter === ordersMongo.length) {
-						bulk.execute((error, result) => {
-							if (error) throw (err);
-							resolve(result);
-						});
-					}
-				}
-			});
-			// Resolve dbInsertPromise with the result from the bulk operation
-			dbInsertPromise.then((result) => {
-				if (result["ok"] === 1) {
-					systemLog(`[MongoDB] Successfully performed bulk operation with ${result["nUpserted"]} upserted; ${result["nMatched"]} matched; ${result["nModified"]} modified`);
-				} else {
-					systemLog(JSON.stringify(result));
-				}
-				db.close();
-			}).catch(error => systemLog(error));
-		})
+	return new Promise((resolve, reject) => {
+		// Initialize a bulk operation using Mongoose bulk object
+		let bulk = openOrder.collection.initializeOrderedBulkOp();
+		let bulkCounter = 0;
+		// Run a bulk upsert operation
+		for (let i = 0; i < ordersMongo.length; i++) {
+			let order = ordersMongo[i];
+			let query = { shopify_order_id: order.shopify_order_id };
+			bulk.find(query).upsert().updateOne(order);
+			bulkCounter++;
+			// Exit condition
+			if (bulkCounter === ordersMongo.length) {
+				bulk.execute((error, result) => {
+					if (error) throw (err);
+					resolve(result);
+				});
+			}
+		}
+	}).then((result) => {
+		if (result["ok"] === 1) {
+			systemLog(`[MongoDB] Successfully performed bulk operation with ${result["nUpserted"]} upserted; ${result["nMatched"]} matched; ${result["nModified"]} modified`);
+		} else {
+			systemLog(JSON.stringify(result));
+		}
+	}).catch(error => systemLog(error));
 })
-
 
 /* =================================================== */
 
@@ -375,14 +358,22 @@ Promise.all([getDiscountPromise, recallPromise]).then(function (values) {
 	const ordersExcel = transformOrderExcel(orders);
 	// Return an array of promises from ExcelWriter
 	return ExcelStreamPromiseArray(ordersExcel);
-
 }).then((promisesArray) => {
 	Promise.all(promisesArray)
 		.then(() => { return ExcelWriteStream.save(); })
 		.then((stream) => { 
 			stream.pipe(fs.createWriteStream(`./${savePathName}/${importFileName}`)) 
 		})
-		.then(() => systemLog(`[Excel] ExcelWriteStream successfually saved at: ${savePathName}`));
-}).catch(error => systemLog(error));
+		.then(() => systemLog(`[Excel] ExcelWriteStream successfually saved at: ${savePathName}`))
+}).then(() => {
+	// Close connection
+	systemLog("Closing MongoDB connection with a resolved promise.");
+	mongoose.disconnect();
+}).catch(error => { 
+	systemLog(error);
+	// Close connection
+	systemLog("Closing MongoDB connection with a rejected promise.");
+	mongoose.disconnect();
+});
 
 /* =================================================== */
