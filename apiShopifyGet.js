@@ -229,7 +229,7 @@ const transformOrderExcel = (orders) => {
 				}
 			}else if(dicount_code != null && dicount_code != ""){
 				let dc_qry2 = jsonQuery(['dclist[* title=? & products~? | variants~?].value', dicount_code, line_items[j].product_id, line_items[j].variant_id],{data:dcResult});
-				if(dc_qry2.value != null && dc_qry2.value.length > 0){	//
+				if(dc_qry2.value != null && dc_qry2.value.length > 0){
 					dc_percent = parseInt(dc_qry2.value);
 					//systemLog('DC_VALUE: '+ JSON.stringify(dc_percent));
 				}
