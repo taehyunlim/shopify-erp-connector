@@ -41,8 +41,8 @@ const currentFileName = path.basename(__filename);
 
 // Discount Related
 const jsonQuery = require('json-query');
-const dev_zinusapiUrl = 'http://52.160.69.254:3001/discount/map';
-// const zinusapiUrl = 'http://52.160.69.254:3000/discount/map';
+//const dev_zinusapiUrl = 'http://52.160.69.254:3001/discount/map';
+const zinusapiUrl = 'http://52.160.69.254:3000/discount/map';
 var dcResult;
 /* =================================================== */
 
@@ -150,8 +150,7 @@ const getOrdersPromise = (latestOrderId) => {
 // A promise to send request to Zinus API server
 const getDiscountPromise = new Promise((resolve, reject) => {
 	request({
-		url: dev_zinusapiUrl,
-		// url: zinusapiUrl,
+		url: zinusapiUrl,
 		json: true,
 	}, function (error, response, body) {
 		if (error) throw error;
@@ -219,8 +218,9 @@ const transformOrderExcel = (orders) => {
 
 			// Discount Map Search
 			let dc_percent = 0;
+			let dc_qry1;
 			if(discount_code != null && discount_code.startsWith("ZIN15")){
-				let dc_qry1 = jsonQuery(['dclist[* title~? & products~?].value', "Welcome15", lnItm.product_id],{data:dcResult});
+				dc_qry1 = jsonQuery(['dclist[* title~? & products~?].value', "Welcome15", lnItm.product_id],{data:dcResult});
 				if(dc_qry1.value != null && dc_qry1.value.length > 0){
 					dc_percent = parseInt(dc_qry1.value[0]);
 				}
