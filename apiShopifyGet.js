@@ -119,8 +119,8 @@ const recallPromise = new Promise((resolve, reject) => {
 const getOrdersPromise = (latestOrderId) => {
 	return new Promise((resolve, reject) => {
 		request({
-			url: baseurl + `/admin/orders.json?since_id=${latestOrderId}`,
-			// url: baseurl + `/admin/orders.json?since_id=9999999999999`,
+			url: baseurl + `/admin/orders.json?since_id=${latestOrderId}&limit=200`,
+			//url: baseurl + `/admin/orders.json?since_id=479654871100&limit=200`,
 			json: true,
 		}, function (error, response, body) {
 			if (error) throw error;
@@ -190,6 +190,11 @@ const transformOrderExcel = (orders) => {
 		// Two-Letter State code for Washington DC
 		let shipState = (order.shipping_address.province === 'District of Columbia') ? 'DC' : order.shipping_address.province;
 		// Handle Recycling Fees
+<<<<<<< HEAD
+		order['order_recycling_fee'] = (order.shipping_lines[0]) ? order.shipping_lines[0].discounted_price : 0;
+		var dicount_code = (order.discount_codes.length > 0) ? order.discount_codes[0]['code'] : '';
+
+=======
 		let orderRecyclingFee = (order.shipping_lines[0]) ? order.shipping_lines[0].discounted_price : 0;
 		order['order_recycling_fee'] = orderRecyclingFee;
 		// Handle discount coupon code: Hardcoded to take in the fixed 0th code only 
@@ -198,6 +203,7 @@ const transformOrderExcel = (orders) => {
 		let orderDiscFixed = (order.discount_codes[0] && order.discount_codes[0].type === 'fixed_amount') ? order.discount_codes[0].amount : 0;
 		let orderDiscPercent = (order.discount_codes[0] && order.discount_codes[0].type === 'percentage') ? order.discount_codes[0].amount : 0;
 		
+>>>>>>> d24d0ff0459be6260a0a484f164a66fbf21478f4
 		// Handle line item object
 		let line_items = order['line_items']
 		for (let j = 0; j < line_items.length; j++) {
@@ -215,20 +221,36 @@ const transformOrderExcel = (orders) => {
 
 			// Discount Map Search
 			let dc_percent = 0;
+<<<<<<< HEAD
+
+			if(dicount_code != null && dicount_code.startsWith("ZIN15")){
+				let dc_qry1 = jsonQuery(['dclist[* title~? & products~?].value', "Welcome15", line_items[j].product_id],{data:dcResult});
+				//let dc_qry3 = jsonQuery(['dclist[* title~? & products~?].title', "Welcome15", line_items[j].product_id],{data:dcResult});
+				//systemLog(line_items[j].product_id+': ' + JSON.stringify(dc_qry3.value));
+=======
 			let dc_qry1;
 			if(discount_code != null && discount_code.startsWith("ZIN15")){
 				dc_qry1 = jsonQuery(['dclist[* title~? & products~?].value', "Welcome15", lnItm.product_id],{data:dcResult});
 				//systemLog('ZIN15: '+ JSON.stringify(dc_qry1.value));
+>>>>>>> d24d0ff0459be6260a0a484f164a66fbf21478f4
 				if(dc_qry1.value != null && dc_qry1.value.length > 0){
 					//dc_percent = -15;
 					dc_percent = parseInt(dc_qry1.value[0]);
-					systemLog('ZIN15_DC: '+ JSON.stringify(dc_percent));
+					//systemLog(line_items[j].product_id+': '+ JSON.stringify(dc_percent));
 				}
+<<<<<<< HEAD
+			}else if(dicount_code != null && dicount_code != ""){
+				let dc_qry2 = jsonQuery(['dclist[* title=? & products~? | variants~?].value', dicount_code, line_items[j].product_id, line_items[j].variant_id],{data:dcResult});
+				if(dc_qry2.value != null && dc_qry2.value.length > 0){
+					dc_percent = parseInt(dc_qry2.value);
+					//systemLog('DC_VALUE: '+ JSON.stringify(dc_percent));
+=======
 			}else if(discount_code != null && discount_code != ""){
 				dc_qry1 = jsonQuery(['dclist[* title=? & products~? | variants~?].value', discount_code, lnItm.product_id, lnItm.variant_id],{data:dcResult});
 				if(dc_qry1.value != null && dc_qry1.value.length > 0){	//
 					dc_percent = parseInt(dc_qry1.value);
 					systemLog('[DEV] DC_VALUE: '+ JSON.stringify(dc_percent));
+>>>>>>> d24d0ff0459be6260a0a484f164a66fbf21478f4
 				}
 			}
 			let dc_price = (dc_percent/100) * parseFloat(lnItm.price);
