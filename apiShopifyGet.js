@@ -25,27 +25,32 @@ const models = require('./Models/OrderSchema.js')
 const databaseName = 'zsdb_test';
 const dbURI = `mongodb://localhost:27017/${databaseName}`;
 mongoose.Promise = global.Promise;
+// Set Mongoose models as constant variables 
+const openOrder = models.OpenOrders,
+	closedOrder = models.ClosedOrders,
+	pendingOrder = models.PendingOrders;
 
 // API & File System Write Related
 const baseurl = `https://${apikey}:${password}@${shopname}.myshopify.com`;
 const dateString = moment().format("YYYYMMDD");
 const dateTimeString = moment().format("YYYYMMDD_HHmm");
 const savePathName = `./OrderImport/${dateString}`;
-const saveFileName = `ShopifyAPI_Orders_${dateTimeString}.xlsx`;
-const importFileName = `OE_NewOrder_${dateTimeString}_ZINUS.xlsx`;
+const saveFileNameRef = `ShopifyAPI_Orders_${dateTimeString}.xlsx`;
+const saveFileNameOMP = `OE_NewOrder_${dateTimeString}_ZINUS.xlsx`;
 const currentFileName = path.basename(__filename);
 
 // Discount Related
 const jsonQuery = require('json-query');
-const zinusapiUrl = 'http://52.160.69.254:3000/discount/map';
+const dev_zinusapiUrl = 'http://52.160.69.254:3001/discount/map';
+// const zinusapiUrl = 'http://52.160.69.254:3000/discount/map';
 var dcResult;
 /* =================================================== */
 
 
 /* ================ UTILITY FUNCTIONS ================ */
 // Uniform timestamp
-const timestamp = (timeObject) => {
-	return moment(timeObject).format("YYYYMMDD_HHmm");
+const timestamp = (timeObject, addDay = 0) => {
+	return moment(timeObject).add(addDay, 'day').format("YYYYMMDD_HHmm");
 }
 
 // System log (Saved under [./savePathName/dateString/])
@@ -79,16 +84,12 @@ process.on('unhandledRejection', (error, p) => {
 /* ================ DECLARE FUNCTIONS ================ */
 // A promise to recall the last imported orderId
 const recallPromise = new Promise((resolve, reject) => {
-	const db = mongoose.connection;
+	let db = mongoose.connection;
 	mongoose.connect(dbURI)
 	.catch(error => systemLog(error))
 	.then(() => {
-		// Set Mongoose models as constant variables 
-		const openOrder = models.OpenOrders,
-					closedOrder = models.ClosedOrders,
-					pendingOrder = models.PendingOrders;
 		// Create a promise object that resolves with the latest Shopify order id, if any
-		const dbFindPromise = new Promise((resolve, reject) => {
+		return new Promise((resolve, reject) => {
 			////// DEV NOTE: CHANGE QUERY TO SORTY BY date_ordered_shopify AFTER REFORMATTING ITS STRING VALUE AT IMPORT //////
 			let query = { "date_received": -1, "shopify_po": -1, "date_ordered_shopify": -1 };
 			// First check if there are any open orders
@@ -103,19 +104,15 @@ const recallPromise = new Promise((resolve, reject) => {
 						// CASE 2-1: There is a closed order --> Resolve the latest closed order id
 						if (result[0]) { resolve(result[0].shopify_order_id) }
 						// CASE 2-2: There is no closed order --> Resolve with a base value (shopify_order_id = 0)
-						//else { resolve(null) }
 						else { resolve(0) }
 					})
 				}
 			})
 		});
-		// Resolve dbFindPromise with the recalled latest order id
-		dbFindPromise.then((latestOrderId) => {
-			resolve(latestOrderId);
-			db.close();
-		}).catch(error => systemLog(error) )
-	})
-
+	}).then((latestOrderId) => {
+		// Resolve parent promise (recallPromise) with the recalled latest order id
+		resolve(latestOrderId);
+	}).catch(error => reject(error))
 });
 
 // A promise to send request to Shopify API server
@@ -130,16 +127,16 @@ const getOrdersPromise = (latestOrderId) => {
 			if (!error && response.statusCode === 200) {
 				if (body.orders) {
 					if (body.orders.length === 0) {
-						systemLog(`No order received since lastestOrderId: ${latestOrderId}`);
+						reject(`[API] No order received since lastestOrderId: ${latestOrderId}`);
 					} else {
-						systemLog(`ORDERS ARRAY LENGTH: ${body.orders.length}`);
+						systemLog(`[API] ORDERS ARRAY LENGTH: ${body.orders.length}`);
 						resolve(body.orders);
 					}
 				} else {
-					systemLog(`Response returned with exception body: \r\n${JSON.stringify(body)}`);
+					reject(`[API] Response returned with exception body: \r\n${JSON.stringify(body)}`);
 				}
 			} else if (!error && response.statusCode !== 200) {
-				systemLog(`Response returned with Status Code: ${response.statusCode}`);
+				reject(`[API] Response returned with Status Code: ${response.statusCode}`);
 			}
 		})
 	});
@@ -149,32 +146,36 @@ const getOrdersPromise = (latestOrderId) => {
 // A promise to send request to Zinus API server
 const getDiscountPromise = new Promise((resolve, reject) => {
 	request({
-		url: zinusapiUrl,
+		url: dev_zinusapiUrl,
+		// url: zinusapiUrl,
 		json: true,
 	}, function (error, response, body) {
 		if (error) throw error;
 		if (!error && response.statusCode === 200) {
 			if (body.dclist) {
 				if (body.dclist.length === 0) {
-					systemLog(`No dclist received`);
+					reject(`[API] No dclist received`);
 				} else {
-					systemLog(`Dicount ARRAY LENGTH: ${body.dclist.length}`);
+					systemLog(`[API] Dicount ARRAY LENGTH: ${body.dclist.length}`);
 					resolve(body);
 				}
 			} else {
-				systemLog(`Response returned with exception body: \r\n${JSON.stringify(body)}`);
+				reject(`[API] Response returned with exception body: \r\n${JSON.stringify(body)}`);
 			}
 		} else if (!error && response.statusCode !== 200) {
-			systemLog(`Response returned with Status Code: ${response.statusCode}`);
+			reject(`[API] Response returned with Status Code: ${response.statusCode}`);
 		}
 	})
 });
  
-// Output columns
+// Excel columns (for Reference)
 let excelCols = ['order_index', 'id', 'order_number', 'contact_email', 'created_at', 'total_price', 'total_line_items_price', 'subtotal_price', 'total_tax', 'total_discounts'];
 
 // Below columns need data transformation: transformOrderExcel
-excelCols = excelCols.concat(['zinus_po', 'discount_code_0', 'shipping_address_name', 'shipping_address_address_1', 'shipping_address_address_2', 'shipping_address_city', 'shipping_address_state', 'shipping_address_zip', 'shipping_address_country', 'shipping_address_phone','order_recycling_fee', 'line_items_index', 'line_items_sku', 'line_items_product_id', 'line_items_variant_id', 'line_items_quantity', 'line_items_price', 'line_items_discount_price', 'line_items_discount_rate', 'line_items_unit_price', 'line_items_tax_price', 'line_items_tax_rate']);
+excelCols = excelCols.concat(['zinus_po', 'discount_code_0', 'order_recycling_fee', 'line_items_index', 'line_items_sku', 'line_items_product_id', 'line_items_variant_id', 'line_items_quantity', 'line_items_price', 'line_items_discount_price', 'line_items_discount_rate', 'line_items_unit_price', 'line_items_tax_price', 'line_items_tax_rate']);
+
+// OMP columns
+const excelColsOMP = ['ISACONTROLNO', 'DOCUMENTNO', 'ISAID', 'SHIPTO', 'SHPNAME', 'SHPADDR1', 'SHPADDR2', 'SHPADDR3', 'SHPADDR4', 'SHPCITY', 'SHIPSTATE', 'SHPZIP', 'SHPCOUNTRY', 'SHPPHONE', 'SHPEMAIL', 'PONUMBER', 'REFERENCE', 'ORDDATE', 'TD503', 'TD505', 'TD512', 'EXPDATE', 'DELVBYDATE', 'WHCODE', 'STATUS', 'OPTORD01', 'OPTORD02', 'OPTORD03', 'OPTORD04', 'OPTORD05', 'OPTORD06', 'OPTORD07', 'OPTORD08', 'OPTORD09', 'OPTORD10', 'OPTORD11', 'OPTORD12', 'OPTORD13', 'OPTORD14', 'OPTORD15', 'LINENUM', 'ITEM', 'QTYORDERED', 'ORDUNIT', 'UNITPRICE', 'OPTITM01', 'OPTITM02', 'OPTITM03', 'OPTITM04', 'OPTITM05', 'OPTITM06', 'OPTITM07', 'OPTITM08', 'OPTITM09', 'OPTITM10', 'IMPORTTIME', 'REASONCODE'];
 
 // Globally scoped order index
 let order_index = 0;
@@ -186,106 +187,230 @@ const transformOrderExcel = (orders) => {
 		let order = orders[i];
 		// Assign Zinus PO, which is Order # prefixed by "ZC"
 		order['zinus_po'] = "ZC" + order.order_number;
-		// Handle discount coupon code
-		order['discount_code_0'] = (order.discount_codes.length > 0) ? order.discount_codes[0]['code'] : '';
-		// Handle shipping address object
-		order['shipping_address_name'] = order.shipping_address.name;
-		order['shipping_address_address_1'] = order.shipping_address.address1;
-		order['shipping_address_address_2'] = order.shipping_address.address2;
-		order['shipping_address_city'] = order.shipping_address.city;
-		order['shipping_address_state'] = order.shipping_address.province;
-		order['shipping_address_zip'] = order.shipping_address.zip;
-		order['shipping_address_country'] = order.shipping_address.country;
-		order['shipping_address_phone'] = order.shipping_address.phone;
+		// Two-Letter State code for Washington DC
+		let shipState = (order.shipping_address.province === 'District of Columbia') ? 'DC' : order.shipping_address.province;
 		// Handle Recycling Fees
+<<<<<<< HEAD
 		order['order_recycling_fee'] = (order.shipping_lines[0]) ? order.shipping_lines[0].discounted_price : 0;
 		var dicount_code = (order.discount_codes.length > 0) ? order.discount_codes[0]['code'] : '';
 
+=======
+		let orderRecyclingFee = (order.shipping_lines[0]) ? order.shipping_lines[0].discounted_price : 0;
+		order['order_recycling_fee'] = orderRecyclingFee;
+		// Handle discount coupon code: Hardcoded to take in the fixed 0th code only 
+		let discount_code = (order.discount_codes.length > 0) ? order.discount_codes[0]['code'] : '';
+		// Retrieve order level discount (Test purpose only - NOT to be used for invoicing)
+		let orderDiscFixed = (order.discount_codes[0] && order.discount_codes[0].type === 'fixed_amount') ? order.discount_codes[0].amount : '';
+		let orderDiscPercent = (order.discount_codes[0] && order.discount_codes[0].type === 'percentage') ? order.discount_codes[0].amount : '';
+		
+>>>>>>> d24d0ff0459be6260a0a484f164a66fbf21478f4
 		// Handle line item object
 		let line_items = order['line_items']
 		for (let j = 0; j < line_items.length; j++) {
+			let lnItm = line_items[j];
 			// Increment the globally scoped Order Index 
 			order_index++;
 			// Handle nested tax object
 			let line_items_tax_price = 0,
 				line_items_tax_rate = 0;
-			if (line_items[j].tax_lines.length > 0) {
-				let line_items_tax_lines = line_items[j].tax_lines;
+			if (lnItm.tax_lines.length > 0) {
+				let line_items_tax_lines = lnItm.tax_lines;
 				line_items_tax_price = truncateToCent(line_items_tax_lines.reduce((sum, e) => sum + parseFloat(e["price"]), 0));
 				line_items_tax_rate = line_items_tax_lines.reduce((sum, e) => sum + parseFloat(e["rate"]), 0);
 			};
 
 			// Discount Map Search
 			let dc_percent = 0;
+<<<<<<< HEAD
 
 			if(dicount_code != null && dicount_code.startsWith("ZIN15")){
 				let dc_qry1 = jsonQuery(['dclist[* title~? & products~?].value', "Welcome15", line_items[j].product_id],{data:dcResult});
 				//let dc_qry3 = jsonQuery(['dclist[* title~? & products~?].title', "Welcome15", line_items[j].product_id],{data:dcResult});
 				//systemLog(line_items[j].product_id+': ' + JSON.stringify(dc_qry3.value));
+=======
+			let dc_qry1;
+			if(discount_code != null && discount_code.startsWith("ZIN15")){
+				dc_qry1 = jsonQuery(['dclist[* title~? & products~?].value', "Welcome15", lnItm.product_id],{data:dcResult});
+				//systemLog('ZIN15: '+ JSON.stringify(dc_qry1.value));
+>>>>>>> d24d0ff0459be6260a0a484f164a66fbf21478f4
 				if(dc_qry1.value != null && dc_qry1.value.length > 0){
 					//dc_percent = -15;
 					dc_percent = parseInt(dc_qry1.value[0]);
 					//systemLog(line_items[j].product_id+': '+ JSON.stringify(dc_percent));
 				}
+<<<<<<< HEAD
 			}else if(dicount_code != null && dicount_code != ""){
 				let dc_qry2 = jsonQuery(['dclist[* title=? & products~? | variants~?].value', dicount_code, line_items[j].product_id, line_items[j].variant_id],{data:dcResult});
 				if(dc_qry2.value != null && dc_qry2.value.length > 0){
 					dc_percent = parseInt(dc_qry2.value);
 					//systemLog('DC_VALUE: '+ JSON.stringify(dc_percent));
+=======
+			}else if(discount_code != null && discount_code != ""){
+				dc_qry1 = jsonQuery(['dclist[* title=? & products~? | variants~?].value', discount_code, lnItm.product_id, lnItm.variant_id],{data:dcResult});
+				if(dc_qry1.value != null && dc_qry1.value.length > 0){	//
+					dc_percent = parseInt(dc_qry1.value);
+					systemLog('[DEV] DC_VALUE: '+ JSON.stringify(dc_percent));
+>>>>>>> d24d0ff0459be6260a0a484f164a66fbf21478f4
 				}
 			}
-			let dc_price = (dc_percent/100) * parseFloat(line_items[j].price);
-			let dc_uprice = (parseFloat(line_items[j].price) + dc_price).toFixed(2);
+			let dc_price = (dc_percent/100) * parseFloat(lnItm.price);
+			let dc_uprice = (parseFloat(lnItm.price) + dc_price).toFixed(2);
 			dc_price = dc_price.toFixed(2);
 
 			// Clone an order object and push to the ordersArray
 			let orderCopy = Object.assign({
 				'line_items_index': j+1,
-				'line_items_sku': line_items[j].sku,
-				'line_items_product_id': line_items[j].product_id,
-				'line_items_variant_id': line_items[j].variant_id,
-				'line_items_quantity': line_items[j].quantity,
-				'line_items_price': line_items[j].price,
+				'line_items_sku': lnItm.sku,
+				'line_items_product_id': lnItm.product_id,
+				'line_items_variant_id': lnItm.variant_id,
+				'line_items_quantity': lnItm.quantity,
+				'line_items_price': lnItm.price,
 				'line_items_tax_price': line_items_tax_price,
 				'line_items_tax_rate': line_items_tax_rate,
 				'line_items_discount_rate': dc_percent, // PLACEHOLDER FOR PRICERULE API
 				'line_items_discount_price': dc_price, // PLACEHOLDER FOR PRICERULE API
 				'line_items_unit_price': dc_uprice, // PLACEHOLDER FOR PRICERULE API
-				'order_index': order_index
+				'order_index': order_index,
+				'ISACONTROLNO': order.id,
+				'DOCUMENTNO': 1,
+				'ISAID': 'ZINUS.COM',
+				'SHIPTO': order.shipping,
+				'SHPNAME': order.shipping_address.name,
+				'SHPADDR1': order.shipping_address.address1,
+				'SHPADDR2': order.shipping_address.address2,
+				'SHPADDR3': '',
+				'SHPADDR4': '',
+				'SHPCITY': order.shipping_address.city,
+				'SHPSTATE': shipState,
+				'SHPZIP': order.shipping_address.zip,
+				'SHPCOUNTRY': order.shipping_address.country,
+				'SHPPHONE': order.shipping_address.phone,
+				'SHPEMAIL': order.email,
+				'PONUMBER': 'ZC' + order.order_number,
+				'REFERENCE': '',
+				'ORDDATE': timestamp(order.created_at),
+				'TD503': '',
+				'TD505': '',
+				'TD512': '',
+				'EXPDATE': timestamp(order.created_at, 5),
+				'DELVBYDATE': timestamp(order.created_at, 10),
+				'WHCODE': '',
+				'STATUS': 0,
+				'OPTORD01': order.order_number,
+				'OPTORD02': order.total_price,
+				'OPTORD03': order.subtotal_price,
+				'OPTORD04': order.total_tax,
+				'OPTORD05': timestamp(order.created_at),
+				'OPTORD06': orderDiscPercent,
+				'OPTORD07': orderDiscFixed,
+				'OPTORD08': order.total_discounts,
+				'OPTORD09': 'FedEx Ground',
+				'OPTORD10': discount_code,
+				'OPTORD11': orderRecyclingFee,
+				'OPTORD12': '',
+				'OPTORD13': '',
+				'OPTORD14': '',
+				'OPTORD15': '',
+				'LINENUM': j, // Line Item Index
+				'ITEM': lnItm.sku,
+				'QTYORDERED': lnItm.quantity,
+				'ORDUNIT': 'ea',
+				'UNITPRICE': dc_uprice,
+				'OPTITM01': line_items_tax_price,
+				'OPTITM02': '',
+				'OPTITM03': Math.abs(dc_price), // Discount price, asbsoulte value
+				'OPTITM04': lnItm.pre_tax_price,
+				'OPTITM05': lnItm.price,
+				'OPTITM06': '',
+				'OPTITM07': '',
+				'OPTITM08': '',
+				'OPTITM09': '',
+				'OPTITM10': '',
 			}, order);
 			ordersArray.push(orderCopy);
 		}
 	}
 	return ordersArray;
 }
-// version test
-// Delcare a stream object for ExcelWriter and specify data cols & rows
-let excelStreamColsArray = excelCols.map((val) => {
-	let acc = {};
-	acc.name = val;
-	acc.key = val;
-	return acc;
-})
 
-let ExcelWriteStream = new ExcelWriter({
-	sheets: [{
-		key: 'OE_NewOrder',
-		headers: excelStreamColsArray
-	}]
-});
-
-// Map each order object to promise object in the promisesArray
-const ExcelStreamPromiseArray = (ordersExcel) => {
-	const promisesArray = ordersExcel.map((order) => {
-		// Break down each order object property to its corresponding column
-		let excelInput = {};
-		excelCols.map((prop) => {
-			excelInput[prop] = order[prop];
-		});
-		// Add excelInput obejct to the write stream
-		ExcelWriteStream.addData('OE_NewOrder', excelInput);
+// Convert transformed orders to excel sheet (Reference)
+const excelWritePromise1 = (ordersExcel, colsExcel) => {
+	// Delcare a stream object for ExcelWriter and specify data cols & rows
+	let excelStreamColsArray = colsExcel.map((val) => {
+		let acc = {};
+		acc.name = val;
+		acc.key = val;
+		return acc;
 	});
-	return promisesArray;
+	let ExcelWriteStreamOMP = new ExcelWriter({
+		sheets: [{
+			key: 'ShopifyAPI_Orders',
+			name: 'ShopifyAPI_Orders',
+			headers: excelStreamColsArray
+		}]
+	});
+	// Return a promise
+	return new Promise((resolve, reject) => {
+		// Create an array of ExcelWriteStream promises
+		const promisesArray = ordersExcel.map((order) => {
+			// Break down each order object property to its corresponding column
+			let excelInput = {};
+			colsExcel.map((prop) => {
+				excelInput[prop] = order[prop];
+			});
+			// Add excelInput obejct to the write stream
+			ExcelWriteStreamOMP.addData('ShopifyAPI_Orders', excelInput);
+		});
+		// Fulfill the array of ExcelWriteStream promises
+		Promise.all(promisesArray)
+			.then(() => { return ExcelWriteStreamOMP.save(); })
+			.then((stream) => {
+				stream.pipe(fs.createWriteStream(`./${savePathName}/${saveFileNameRef}`))
+			})
+			.then(() => resolve(`[Excel] ${saveFileNameRef} successfually saved at: ${savePathName}`))
+			.catch((error) => reject(error));
+	});	
+}
+
+
+// Convert transformed orders to excel sheet (OMP)
+const excelWritePromise2 = (ordersExcel, colsExcel) => {
+	// Delcare a stream object for ExcelWriter and specify data cols & rows
+	let excelStreamColsArray = colsExcel.map((val) => {
+		let acc = {};
+		acc.name = val;
+		acc.key = val;
+		return acc;
+	});
+	let ExcelWriteStreamOMP = new ExcelWriter({
+		sheets: [{
+			key: 'OE_NewOrder',
+			name: 'OE_NewOrder',
+			headers: excelStreamColsArray
+		}]
+	});
+
+	// Return a promise
+	return new Promise((resolve, reject) => {
+		// Create an array of ExcelWriteStream promises
+		const promisesArray = ordersExcel.map((order) => {
+			// Break down each order object property to its corresponding column
+			let excelInput = {};
+			colsExcel.map((prop) => {
+				excelInput[prop] = order[prop];
+			});
+			// Add excelInput obejct to the write stream
+			ExcelWriteStreamOMP.addData('OE_NewOrder', excelInput);
+		});
+		// Fulfill the array of ExcelWriteStream promises
+		Promise.all(promisesArray)
+			.then(() => { return ExcelWriteStreamOMP.save(); })
+			.then((stream) => {
+				stream.pipe(fs.createWriteStream(`./${savePathName}/${saveFileNameOMP}`))
+			})
+			.then(() => resolve(`[Excel] ${saveFileNameOMP} successfually saved at: ${savePathName}`))
+			.catch((error) => reject(error));
+	});
 }
 
 // Property names for order data within MongoDB document colleciton (OpenOrders)
@@ -319,78 +444,66 @@ const transformOrderMongo = ((orders) => {
 
 // Insert transformed orders to MongoDB using Mongoose ORM
 const dbInsert = ((ordersMongo) => {
-	const db = mongoose.connection;
-	mongoose.connect(dbURI)
-		.catch(error => systemLog(error))
-		.then(() => {
-			// Set Mongoose models as constant variables 
-			const openOrder = models.OpenOrders,
-				closedOrder = models.ClosedOrders,
-				pendingOrder = models.PendingOrders;
-			// Create a promise object 
-			const dbInsertPromise = new Promise((resolve, reject) => {
-				// Initialize a bulk operation using Mongoose bulk object
-				let bulk = openOrder.collection.initializeOrderedBulkOp();
-				let bulkCounter = 0;
-				// Run a bulk upsert operation
-				for (let i = 0; i < ordersMongo.length; i++) {
-					let order = ordersMongo[i];
-					let query = { shopify_order_id: order.shopify_order_id};
-					bulk.find(query).upsert().updateOne(order);
-					bulkCounter++;
-					// Exit condition
-					if (bulkCounter === ordersMongo.length) {
-						bulk.execute((error, result) => {
-							if (error) throw (err);
-							resolve(result);
-						});
+	return new Promise((resolve, reject) => {
+		// Initialize a bulk operation using Mongoose bulk object
+		let bulk = openOrder.collection.initializeOrderedBulkOp();
+		let bulkCounter = 0;
+		// Run a bulk upsert operation
+		for (let i = 0; i < ordersMongo.length; i++) {
+			let order = ordersMongo[i];
+			let query = { shopify_order_id: order.shopify_order_id };
+			bulk.find(query).upsert().updateOne(order);
+			bulkCounter++;
+			// Exit condition
+			if (bulkCounter === ordersMongo.length) {
+				bulk.execute((error, result) => {
+					if (error) throw (err);
+					if (result["ok"] === 1) {
+						resolve(`[MongoDB] Successfully performed bulk operation with ${result["nUpserted"]} upserted; ${result["nMatched"]} matched; ${result["nModified"]} modified`);
+					} else {
+						reject(`[MongoDB] ${JSON.stringify(result)}`);
 					}
-				}
-			});
-			// Resolve dbInsertPromise with the result from the bulk operation
-			dbInsertPromise.then((result) => {
-				if (result["ok"] === 1) {
-					systemLog(`[MongoDB] Successfully performed bulk operation with ${result["nUpserted"]} upserted; ${result["nMatched"]} matched; ${result["nModified"]} modified`);
-				} else {
-					systemLog(JSON.stringify(result));
-				}
-				db.close();
-			}).catch(error => systemLog(error));
-		})
+				});
+			}
+		}
+	});
 })
-
 
 /* =================================================== */
 
 
 /* ================ EXECUTE FUNCTIONS ================ */
 // Resolve the recallPromise
-/* recallPromise.then(latestOrderId => {
-	systemLog(`LATEST ORDER ID: ${latestOrderId}`);
-	return getOrdersPromise(latestOrderId); */
 Promise.all([getDiscountPromise, recallPromise]).then(function (values) {
 	//systemLog(`DISCOUNT: ${values[0]}`);
 	dcResult = values[0];
 	//dclistArray = values[1];
-	let l_order = values[1];
-	systemLog(`LATEST ORDER ID: ${l_order}`);
-	return getOrdersPromise(l_order);	
+	let lastOrder = values[1];
+	systemLog(`LATEST ORDER ID: ${lastOrder}`);
+	return getOrdersPromise(lastOrder);	
 }).then(orders => {	
-	// Transform and insert orders
-	const ordersMongo = transformOrderMongo(orders);
-	dbInsert(ordersMongo);
-
-	// Return an array of promises from ExcelWriter
+	// Transform orders for MongoDB
+	const ordersMongo = transformOrderMongo(orders);	
+	// Transform orders for Excel
 	const ordersExcel = transformOrderExcel(orders);
-	return ExcelStreamPromiseArray(ordersExcel);
-
-}).then((promisesArray) => {
-	Promise.all(promisesArray)
-		.then(() => { return ExcelWriteStream.save(); })
-		.then((stream) => { 
-			stream.pipe(fs.createWriteStream(`./${savePathName}/${importFileName}`)) 
-		})
-		.then(() => systemLog(`[Excel] ExcelWriteStream successfually saved at: ${savePathName}`));
-}).catch(error => systemLog(error));
+	// Insert order entry to MongoDB
+	const promise1 = dbInsert(ordersMongo);
+	// ExcelWriter for Reference output
+	const promise2 = excelWritePromise1(ordersExcel, excelCols);
+	// ExcelWriter for OMP output
+	const promise3 = excelWritePromise2(ordersExcel, excelColsOMP);
+	// Fulfill all promises
+	return Promise.all([promise1, promise2, promise3]);
+}).then((result) => {
+	result.map(e => systemLog(e));
+	// Close connection
+	systemLog("[MongoDB] Closing MongoDB connection with a resolved promise.");
+	mongoose.disconnect();
+}).catch(error => { 
+	systemLog(error);
+	// Close connection
+	systemLog("[MongoDB] Closing MongoDB connection with a rejected promise.");
+	mongoose.disconnect();
+});
 
 /* =================================================== */
