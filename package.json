@@ -23,6 +23,7 @@
     "json-2-csv": "^2.2.0",
     "json-query": "^2.2.2",
     "json2xls": "^0.1.2",
+    "json-query": "^2.2.2",
     "limiter": "^1.1.2",
     "moment": "^2.21.0",
     "mongoose": "^5.0.11",
