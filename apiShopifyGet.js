@@ -12,9 +12,12 @@ const limiter = new Bottleneck({maxConcurrent: 3, minTime: 500});
 
 // Shopify API Credential
 const config = require('./config.js');
-const apikey = config.shopify_api_key_dev;
+/* const apikey = config.shopify_api_key_dev;
 const password = config.shopify_api_pw_dev;
-const shopname = config.shopify_shopname_dev;
+const shopname = config.shopify_shopname_dev; */
+const apikey = config.shopify_api_key_prod;
+const password = config.shopify_api_pw_prod;
+const shopname = config.shopify_shopname_prod;
 
 // Database Setup
 const mongoose = require('mongoose');
@@ -211,19 +214,26 @@ const transformOrderExcel = (orders) => {
 			};
 
 			// Discount Map Search
-			//systemLog('discount_code: '+ discount_code);
 			let dc_percent = 0;
-			if(discount_code != null && discount_code != ""){
-				//systemLog('product_id: '+ lnItm.product_id);
-				//systemLog('variant_id: '+ lnItm.variant_id);
-				let dc_qry1 = jsonQuery(['dclist[* title=? & products~? | variants~?].value', discount_code, lnItm.product_id, lnItm.variant_id],{data:dcResult});
+			let dc_qry1;
+			if(discount_code != null && discount_code.startsWith("ZIN15")){
+				dc_qry1 = jsonQuery(['dclist[* title~? & products~?].value', "Welcome15", lnItm.product_id],{data:dcResult});
+				//systemLog('ZIN15: '+ JSON.stringify(dc_qry1.value));
+				if(dc_qry1.value != null && dc_qry1.value.length > 0){
+					//dc_percent = -15;
+					dc_percent = parseInt(dc_qry1.value[0]);
+					systemLog('ZIN15_DC: '+ JSON.stringify(dc_percent));
+				}
+			}else if(discount_code != null && discount_code != ""){
+				dc_qry1 = jsonQuery(['dclist[* title=? & products~? | variants~?].value', discount_code, lnItm.product_id, lnItm.variant_id],{data:dcResult});
 				if(dc_qry1.value != null && dc_qry1.value.length > 0){	//
 					dc_percent = parseInt(dc_qry1.value);
 					systemLog('[DEV] DC_VALUE: '+ JSON.stringify(dc_percent));
 				}
 			}
 			let dc_price = (dc_percent/100) * parseFloat(lnItm.price);
-			let dc_uprice = parseFloat(lnItm.price) + dc_price;
+			let dc_uprice = (parseFloat(lnItm.price) + dc_price).toFixed(2);
+			dc_price = dc_price.toFixed(2);
 
 			// Clone an order object and push to the ordersArray
 			let orderCopy = Object.assign({
@@ -446,8 +456,9 @@ Promise.all([getDiscountPromise, recallPromise]).then(function (values) {
 	//systemLog(`DISCOUNT: ${values[0]}`);
 	dcResult = values[0];
 	//dclistArray = values[1];
-	systemLog(`[API] LATEST ORDER ID: ${values[1]}`);
-	return getOrdersPromise(values[1]);	
+	let lastOrder = values[1];
+	systemLog(`LATEST ORDER ID: ${lastOrder}`);
+	return getOrdersPromise(lastOrder);	
 }).then(orders => {	
 	// Transform orders for MongoDB
 	const ordersMongo = transformOrderMongo(orders);	
