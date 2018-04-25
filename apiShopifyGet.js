@@ -195,8 +195,8 @@ const transformOrderExcel = (orders) => {
 		// Handle discount coupon code: Hardcoded to take in the fixed 0th code only 
 		let discount_code = (order.discount_codes.length > 0) ? order.discount_codes[0]['code'] : '';
 		// Retrieve order level discount (Test purpose only - NOT to be used for invoicing)
-		let orderDiscFixed = (order.discount_codes[0] && order.discount_codes[0].type === 'fixed_amount') ? order.discount_codes[0].amount : '';
-		let orderDiscPercent = (order.discount_codes[0] && order.discount_codes[0].type === 'percentage') ? order.discount_codes[0].amount : '';
+		let orderDiscFixed = (order.discount_codes[0] && order.discount_codes[0].type === 'fixed_amount') ? order.discount_codes[0].amount : 0;
+		let orderDiscPercent = (order.discount_codes[0] && order.discount_codes[0].type === 'percentage') ? order.discount_codes[0].amount : 0;
 		
 		// Handle line item object
 		let line_items = order['line_items']
@@ -249,10 +249,11 @@ const transformOrderExcel = (orders) => {
 				'line_items_discount_price': dc_price, // PLACEHOLDER FOR PRICERULE API
 				'line_items_unit_price': dc_uprice, // PLACEHOLDER FOR PRICERULE API
 				'order_index': order_index,
-				'ISACONTROLNO': order.id,
+				// OMP Excel Columns (Total 55) below
+				'ISACONTROLNO': order.id, // Shopify Order ID
 				'DOCUMENTNO': 1,
 				'ISAID': 'ZINUS.COM',
-				'SHIPTO': order.shipping,
+				'SHIPTO': '', // BLANK
 				'SHPNAME': order.shipping_address.name,
 				'SHPADDR1': order.shipping_address.address1,
 				'SHPADDR2': order.shipping_address.address2,
