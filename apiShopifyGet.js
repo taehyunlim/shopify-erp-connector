@@ -122,8 +122,8 @@ const recallPromise = new Promise((resolve, reject) => {
 const getOrdersPromise = (latestOrderId) => {
 	return new Promise((resolve, reject) => {
 		request({
-			url: baseurl + `/admin/orders.json?since_id=${latestOrderId}`,
-			// url: baseurl + `/admin/orders.json?since_id=9999999999999`,
+			url: baseurl + `/admin/orders.json?since_id=${latestOrderId}&limit=200`,
+			//url: baseurl + `/admin/orders.json?since_id=479654871100&limit=200`,
 			json: true,
 		}, function (error, response, body) {
 			if (error) throw error;
@@ -200,6 +200,7 @@ const transformOrderExcel = (orders) => {
 		// Handle Recycling Fees
 		order['order_recycling_fee'] = (order.shipping_lines[0]) ? order.shipping_lines[0].discounted_price : 0;
 		var dicount_code = (order.discount_codes.length > 0) ? order.discount_codes[0]['code'] : '';
+
 		// Handle line item object
 		let line_items = order['line_items']
 		for (let j = 0; j < line_items.length; j++) {
@@ -215,24 +216,22 @@ const transformOrderExcel = (orders) => {
 			};
 
 			// Discount Map Search
-			//systemLog('dicount_code: '+ dicount_code);
 			let dc_percent = 0;
-			let dc_qry1;
-			//systemLog('product_id: '+ line_items[j].product_id);
-			//systemLog('variant_id: '+ line_items[j].variant_id);
+
 			if(dicount_code != null && dicount_code.startsWith("ZIN15")){
-				dc_qry1 = jsonQuery(['dclist[* title~? & products~?].value', "Welcome15", line_items[j].product_id],{data:dcResult});
-				//systemLog('ZIN15: '+ JSON.stringify(dc_qry1.value));
+				let dc_qry1 = jsonQuery(['dclist[* title~? & products~?].value', "Welcome15", line_items[j].product_id],{data:dcResult});
+				//let dc_qry3 = jsonQuery(['dclist[* title~? & products~?].title', "Welcome15", line_items[j].product_id],{data:dcResult});
+				//systemLog(line_items[j].product_id+': ' + JSON.stringify(dc_qry3.value));
 				if(dc_qry1.value != null && dc_qry1.value.length > 0){
 					//dc_percent = -15;
 					dc_percent = parseInt(dc_qry1.value[0]);
-					systemLog('ZIN15_DC: '+ JSON.stringify(dc_percent));
+					//systemLog(line_items[j].product_id+': '+ JSON.stringify(dc_percent));
 				}
 			}else if(dicount_code != null && dicount_code != ""){
-				dc_qry1 = jsonQuery(['dclist[* title=? & products~? | variants~?].value', dicount_code, line_items[j].product_id, line_items[j].variant_id],{data:dcResult});
-				if(dc_qry1.value != null && dc_qry1.value.length > 0){	//
-					dc_percent = parseInt(dc_qry1.value);
-					systemLog('DC_VALUE: '+ JSON.stringify(dc_percent));
+				let dc_qry2 = jsonQuery(['dclist[* title=? & products~? | variants~?].value', dicount_code, line_items[j].product_id, line_items[j].variant_id],{data:dcResult});
+				if(dc_qry2.value != null && dc_qry2.value.length > 0){	//
+					dc_percent = parseInt(dc_qry2.value);
+					//systemLog('DC_VALUE: '+ JSON.stringify(dc_percent));
 				}
 			}
 			let dc_price = (dc_percent/100) * parseFloat(line_items[j].price);
