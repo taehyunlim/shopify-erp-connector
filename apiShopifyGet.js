@@ -123,7 +123,8 @@ const recallPromise = new Promise((resolve, reject) => {
 const getOrdersPromise = (latestOrderId) => {
 	return new Promise((resolve, reject) => {
 		request({
-			url: baseurl + `/admin/orders.json?financial_status=paid&since_id=${latestOrderId}&limit=250`,
+			// url: baseurl + `/admin/orders.json?financial_status=paid&since_id=${latestOrderId}&limit=250`,
+			url: baseurl + `/admin/orders.json?financial_status=paid&since_id=482508832831&limit=250`,
 			json: true,
 		}, function (error, response, body) {
 			if (error) throw error;
@@ -230,9 +231,9 @@ const transformOrderExcel = (orders) => {
 					systemLog('[DEV] DC_VALUE: '+ JSON.stringify(dc_percent));
 				}
 			}
-			let dc_price = (dc_percent/100) * parseFloat(lnItm.price);
-			let dc_uprice = (parseFloat(lnItm.price) + dc_price).toFixed(2);
-			dc_price = dc_price.toFixed(2);
+			let dc_price = Math.abs((dc_percent/100) * parseFloat(lnItm.price));
+			let dc_uprice = (parseFloat(lnItm.price) - dc_price);
+			dc_price_toFixed = (dc_price).toFixed(2);
 
 			// Clone an order object and push to the ordersArray
 			let orderCopy = Object.assign({
@@ -245,9 +246,10 @@ const transformOrderExcel = (orders) => {
 				'line_items_tax_price': line_items_tax_price,
 				'line_items_tax_rate': line_items_tax_rate,
 				'line_items_discount_rate': dc_percent, // PLACEHOLDER FOR PRICERULE API
-				'line_items_discount_price': dc_price, // PLACEHOLDER FOR PRICERULE API
+				'line_items_discount_price': dc_price_toFixed, // PLACEHOLDER FOR PRICERULE API
 				'line_items_unit_price': dc_uprice, // PLACEHOLDER FOR PRICERULE API
 				'order_index': order_index,
+				'discount_code_0': discount_code,
 				// OMP Excel Columns (Total 55) below
 				'ISACONTROLNO': order.id, // Shopify Order ID
 				'DOCUMENTNO': 1,
@@ -266,19 +268,19 @@ const transformOrderExcel = (orders) => {
 				'SHPEMAIL': order.email,
 				'PONUMBER': 'ZC' + order.order_number,
 				'REFERENCE': '',
-				'ORDDATE': timestamp(order.created_at),
+				'ORDDATE': moment(order.created_at).format("MM/DD/YYYY"),
 				'TD503': '',
 				'TD505': '',
 				'TD512': '',
-				'EXPDATE': timestamp(order.created_at, 5),
-				'DELVBYDATE': timestamp(order.created_at, 10),
+				'EXPDATE': moment(order.created_at).add(5, 'day').format("YYYYMMDD"),
+				'DELVBYDATE': moment(order.created_at).add(10, 'day').format("YYYYMMDD"),
 				'WHCODE': '',
-				'STATUS': 0,
+				'STATUS': '0',
 				'OPTORD01': order.order_number,
 				'OPTORD02': order.total_price,
 				'OPTORD03': order.subtotal_price,
 				'OPTORD04': order.total_tax,
-				'OPTORD05': timestamp(order.created_at),
+				'OPTORD05': moment(order.created_at).format("MM/DD/YYYY"),
 				'OPTORD06': orderDiscPercent,
 				'OPTORD07': orderDiscFixed,
 				'OPTORD08': order.total_discounts,
@@ -289,14 +291,14 @@ const transformOrderExcel = (orders) => {
 				'OPTORD13': '',
 				'OPTORD14': '',
 				'OPTORD15': '',
-				'LINENUM': j, // Line Item Index
+				'LINENUM': j+1, // Line Item Index
 				'ITEM': lnItm.sku,
 				'QTYORDERED': lnItm.quantity,
 				'ORDUNIT': 'ea',
 				'UNITPRICE': dc_uprice,
 				'OPTITM01': line_items_tax_price,
 				'OPTITM02': '',
-				'OPTITM03': Math.abs(dc_price), // Discount price, asbsoulte value
+				'OPTITM03': dc_price_toFixed, // Discount price, asbsoulte value
 				'OPTITM04': lnItm.pre_tax_price,
 				'OPTITM05': lnItm.price,
 				'OPTITM06': '',
@@ -358,6 +360,10 @@ const excelWritePromise2 = (ordersExcel, colsExcel) => {
 		let acc = {};
 		acc.name = val;
 		acc.key = val;
+		// Set default 0 for OPTITM01 column (OMP requirement)
+		if (val === 'OPTITM01') {
+			acc.default = 0;
+		}
 		return acc;
 	});
 	let ExcelWriteStreamOMP = new ExcelWriter({
