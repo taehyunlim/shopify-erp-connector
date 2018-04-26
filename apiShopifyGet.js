@@ -64,6 +64,9 @@ const systemLog = (log) => {
 
 // Initialize savePathName directory
 (function() {
+	if (!fs.existsSync('./OrderImport')) {
+		fs.mkdirSync('./OrderImport');
+	}
 	if (!fs.existsSync(savePathName)) {
 		fs.mkdirSync(savePathName);
 	}
@@ -119,8 +122,7 @@ const recallPromise = new Promise((resolve, reject) => {
 const getOrdersPromise = (latestOrderId) => {
 	return new Promise((resolve, reject) => {
 		request({
-			url: baseurl + `/admin/orders.json?since_id=${latestOrderId}&limit=200`,
-			//url: baseurl + `/admin/orders.json?since_id=479654871100&limit=200`,
+			url: baseurl + `/admin/orders.json?financial_status=paid&since_id=${latestOrderId}&limit=250`,
 			json: true,
 		}, function (error, response, body) {
 			if (error) throw error;
@@ -175,7 +177,7 @@ let excelCols = ['order_index', 'id', 'order_number', 'contact_email', 'created_
 excelCols = excelCols.concat(['zinus_po', 'discount_code_0', 'order_recycling_fee', 'line_items_index', 'line_items_sku', 'line_items_product_id', 'line_items_variant_id', 'line_items_quantity', 'line_items_price', 'line_items_discount_price', 'line_items_discount_rate', 'line_items_unit_price', 'line_items_tax_price', 'line_items_tax_rate']);
 
 // OMP columns
-const excelColsOMP = ['ISACONTROLNO', 'DOCUMENTNO', 'ISAID', 'SHIPTO', 'SHPNAME', 'SHPADDR1', 'SHPADDR2', 'SHPADDR3', 'SHPADDR4', 'SHPCITY', 'SHIPSTATE', 'SHPZIP', 'SHPCOUNTRY', 'SHPPHONE', 'SHPEMAIL', 'PONUMBER', 'REFERENCE', 'ORDDATE', 'TD503', 'TD505', 'TD512', 'EXPDATE', 'DELVBYDATE', 'WHCODE', 'STATUS', 'OPTORD01', 'OPTORD02', 'OPTORD03', 'OPTORD04', 'OPTORD05', 'OPTORD06', 'OPTORD07', 'OPTORD08', 'OPTORD09', 'OPTORD10', 'OPTORD11', 'OPTORD12', 'OPTORD13', 'OPTORD14', 'OPTORD15', 'LINENUM', 'ITEM', 'QTYORDERED', 'ORDUNIT', 'UNITPRICE', 'OPTITM01', 'OPTITM02', 'OPTITM03', 'OPTITM04', 'OPTITM05', 'OPTITM06', 'OPTITM07', 'OPTITM08', 'OPTITM09', 'OPTITM10', 'IMPORTTIME', 'REASONCODE'];
+const excelColsOMP = ['ISACONTROLNO', 'DOCUMENTNO', 'ISAID', 'SHIPTO', 'SHPNAME', 'SHPADDR1', 'SHPADDR2', 'SHPADDR3', 'SHPADDR4', 'SHPCITY', 'SHPSTATE', 'SHPZIP', 'SHPCOUNTRY', 'SHPPHONE', 'SHPEMAIL', 'PONUMBER', 'REFERENCE', 'ORDDATE', 'TD503', 'TD505', 'TD512', 'EXPDATE', 'DELVBYDATE', 'WHCODE', 'STATUS', 'OPTORD01', 'OPTORD02', 'OPTORD03', 'OPTORD04', 'OPTORD05', 'OPTORD06', 'OPTORD07', 'OPTORD08', 'OPTORD09', 'OPTORD10', 'OPTORD11', 'OPTORD12', 'OPTORD13', 'OPTORD14', 'OPTORD15', 'LINENUM', 'ITEM', 'QTYORDERED', 'ORDUNIT', 'UNITPRICE', 'OPTITM01', 'OPTITM02', 'OPTITM03', 'OPTITM04', 'OPTITM05', 'OPTITM06', 'OPTITM07', 'OPTITM08', 'OPTITM09', 'OPTITM10'];
 
 // Globally scoped order index
 let order_index = 0;
