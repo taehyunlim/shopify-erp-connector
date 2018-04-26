@@ -21,6 +21,7 @@
     "bottleneck": "^2.3.0",
     "flat": "^4.0.0",
     "json-2-csv": "^2.2.0",
+    "json-query": "^2.2.2",
     "json2xls": "^0.1.2",
     "limiter": "^1.1.2",
     "moment": "^2.21.0",

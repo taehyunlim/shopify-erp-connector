@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const request = require('request');
 const XLSX = require('xlsx');
-const ExcelWriter = require('node-excel-stream').ExcelWriter; 
+const ExcelWriter = require('node-excel-stream').ExcelWriter;
 const flatten = require('flat');
 const moment = require('moment');
 const Bottleneck = require("bottleneck");
@@ -25,7 +25,7 @@ const models = require('./Models/OrderSchema.js')
 const databaseName = 'zsdb_test';
 const dbURI = `mongodb://localhost:27017/${databaseName}`;
 mongoose.Promise = global.Promise;
-// Set Mongoose models as constant variables 
+// Set Mongoose models as constant variables
 const openOrder = models.OpenOrders,
 	closedOrder = models.ClosedOrders,
 	pendingOrder = models.PendingOrders;
@@ -41,8 +41,8 @@ const currentFileName = path.basename(__filename);
 
 // Discount Related
 const jsonQuery = require('json-query');
-const dev_zinusapiUrl = 'http://52.160.69.254:3001/discount/map';
-// const zinusapiUrl = 'http://52.160.69.254:3000/discount/map';
+//const dev_zinusapiUrl = 'http://52.160.69.254:3001/discount/map';
+const zinusapiUrl = 'http://52.160.69.254:3000/discount/map';
 var dcResult;
 /* =================================================== */
 
@@ -62,6 +62,7 @@ const systemLog = (log) => {
 	fs.appendFileSync(`./${savePathName}/${sysLogFile}`, sysLogBody + log);
 }
 
+// Initialize savePathName directory
 // Initialize savePathName directory
 (function() {
 	if (!fs.existsSync('./OrderImport')) {
@@ -99,9 +100,9 @@ const recallPromise = new Promise((resolve, reject) => {
 			openOrder.find().sort(query).limit(1).lean().exec((err, result) => {
 				if (err) throw err;
 				// CASE 1: There is an open order --> Resolve the latest open order id
-				if (result[0]) { resolve(result[0].shopify_order_id) } 
+				if (result[0]) { resolve(result[0].shopify_order_id) }
 				// CASE 2: There is no 	open order --> Check if there are any closed orders
-				else { 
+				else {
 					closedOrder.find().sort(query).limit(1).lean().exec((err, result) => {
 						if (err) throw err
 						// CASE 2-1: There is a closed order --> Resolve the latest closed order id
@@ -142,14 +143,13 @@ const getOrdersPromise = (latestOrderId) => {
 			}
 		})
 	});
-	
+
 }
 
 // A promise to send request to Zinus API server
 const getDiscountPromise = new Promise((resolve, reject) => {
 	request({
-		url: dev_zinusapiUrl,
-		// url: zinusapiUrl,
+		url: zinusapiUrl,
 		json: true,
 	}, function (error, response, body) {
 		if (error) throw error;
@@ -169,7 +169,7 @@ const getDiscountPromise = new Promise((resolve, reject) => {
 		}
 	})
 });
- 
+
 // Excel columns (for Reference)
 let excelCols = ['order_index', 'id', 'order_number', 'contact_email', 'created_at', 'total_price', 'total_line_items_price', 'subtotal_price', 'total_tax', 'total_discounts'];
 
@@ -194,17 +194,17 @@ const transformOrderExcel = (orders) => {
 		// Handle Recycling Fees
 		let orderRecyclingFee = (order.shipping_lines[0]) ? order.shipping_lines[0].discounted_price : 0;
 		order['order_recycling_fee'] = orderRecyclingFee;
-		// Handle discount coupon code: Hardcoded to take in the fixed 0th code only 
+		// Handle discount coupon code: Hardcoded to take in the fixed 0th code only
 		let discount_code = (order.discount_codes.length > 0) ? order.discount_codes[0]['code'] : '';
 		// Retrieve order level discount (Test purpose only - NOT to be used for invoicing)
 		let orderDiscFixed = (order.discount_codes[0] && order.discount_codes[0].type === 'fixed_amount') ? order.discount_codes[0].amount : 0;
 		let orderDiscPercent = (order.discount_codes[0] && order.discount_codes[0].type === 'percentage') ? order.discount_codes[0].amount : 0;
-		
+
 		// Handle line item object
 		let line_items = order['line_items']
 		for (let j = 0; j < line_items.length; j++) {
 			let lnItm = line_items[j];
-			// Increment the globally scoped Order Index 
+			// Increment the globally scoped Order Index
 			order_index++;
 			// Handle nested tax object
 			let line_items_tax_price = 0,
@@ -217,8 +217,9 @@ const transformOrderExcel = (orders) => {
 
 			// Discount Map Search
 			let dc_percent = 0;
+			let dc_qry1;
 			if(discount_code != null && discount_code.startsWith("ZIN15")){
-				let dc_qry1 = jsonQuery(['dclist[* title~? & products~?].value', "Welcome15", lnItm.product_id],{data:dcResult});
+				dc_qry1 = jsonQuery(['dclist[* title~? & products~?].value', "Welcome15", lnItm.product_id],{data:dcResult});
 				if(dc_qry1.value != null && dc_qry1.value.length > 0){
 					dc_percent = parseInt(dc_qry1.value[0]);
 				}
@@ -346,7 +347,7 @@ const excelWritePromise1 = (ordersExcel, colsExcel) => {
 			})
 			.then(() => resolve(`[Excel] ${saveFileNameRef} successfually saved at: ${savePathName}`))
 			.catch((error) => reject(error));
-	});	
+	});
 }
 
 
@@ -393,7 +394,7 @@ const excelWritePromise2 = (ordersExcel, colsExcel) => {
 // Property names for order data within MongoDB document colleciton (OpenOrders)
 const mongoProps = ['shopify_order_id', 'status', 'date_ordered_shopify', 'date_ordered_sage', 'date_received', 'date_imported', 'date_fulfilled', 'date_posted', 'shopify_po', 'zinus_po', 'sage_order_number', 'm_tracking_no', 'tracking_no', 'company', 'wh_code', 'cancelled', 'posted', 'closed'];
 
-// Transform order data for MongoDB 
+// Transform order data for MongoDB
 const transformOrderMongo = ((orders) => {
 	return orders.map((order) => {
 		let entry = {};
@@ -417,7 +418,7 @@ const transformOrderMongo = ((orders) => {
 		entry['closed'] = false;
 		return entry;
 	})
-}) 
+})
 
 // Insert transformed orders to MongoDB using Mongoose ORM
 const dbInsert = ((ordersMongo) => {
@@ -457,10 +458,10 @@ Promise.all([getDiscountPromise, recallPromise]).then(function (values) {
 	//dclistArray = values[1];
 	let lastOrder = values[1];
 	systemLog(`LATEST ORDER ID: ${lastOrder}`);
-	return getOrdersPromise(lastOrder);	
-}).then(orders => {	
+	return getOrdersPromise(lastOrder);
+}).then(orders => {
 	// Transform orders for MongoDB
-	const ordersMongo = transformOrderMongo(orders);	
+	const ordersMongo = transformOrderMongo(orders);
 	// Transform orders for Excel
 	const ordersExcel = transformOrderExcel(orders);
 	// Insert order entry to MongoDB
@@ -476,7 +477,7 @@ Promise.all([getDiscountPromise, recallPromise]).then(function (values) {
 	// Close connection
 	systemLog("[MongoDB] Closing MongoDB connection with a resolved promise.");
 	mongoose.disconnect();
-}).catch(error => { 
+}).catch(error => {
 	systemLog(error);
 	// Close connection
 	systemLog("[MongoDB] Closing MongoDB connection with a rejected promise.");
