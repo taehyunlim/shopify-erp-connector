@@ -215,6 +215,8 @@ const transformOrderExcel = (orders) => {
 				line_items_tax_price = truncateToCent(line_items_tax_lines.reduce((sum, e) => sum + parseFloat(e["price"]), 0));
 				line_items_tax_rate = line_items_tax_lines.reduce((sum, e) => sum + parseFloat(e["rate"]), 0);
 			};
+			// Pre-tax unit price
+			let line_item_unit_pre_tax = parseFloat(lnItm.pre_tax_price / lnItm.quantity);
 
 			// Discount Map Search
 			let dc_percent = 0;
@@ -278,15 +280,15 @@ const transformOrderExcel = (orders) => {
 				'STATUS': '0',
 				'OPTORD01': order.order_number,
 				'OPTORD02': order.total_price,
-				'OPTORD03': order.subtotal_price,
-				'OPTORD04': order.total_tax,
+				'OPTORD03': order.subtotal_price, // Order subtotal excludes tax and recycling fee
+				'OPTORD04': order.total_tax, // Aggregate tax amount (line items and city/county/state levels)
 				'OPTORD05': moment(order.created_at).format("MM/DD/YYYY"),
 				'OPTORD06': orderDiscPercent,
 				'OPTORD07': orderDiscFixed,
 				'OPTORD08': order.total_discounts,
 				'OPTORD09': 'FedEx Ground',
 				'OPTORD10': discount_code,
-				'OPTORD11': orderRecyclingFee,
+				'OPTORD11': orderRecyclingFee, // Aggregate of recylcing fees (line items)
 				'OPTORD12': '',
 				'OPTORD13': '',
 				'OPTORD14': '',
@@ -295,12 +297,12 @@ const transformOrderExcel = (orders) => {
 				'ITEM': lnItm.sku,
 				'QTYORDERED': lnItm.quantity,
 				'ORDUNIT': 'ea',
-				'UNITPRICE': dc_uprice,
+				'UNITPRICE': line_item_unit_pre_tax,
 				'OPTITM01': line_items_tax_price,
 				'OPTITM02': '',
 				'OPTITM03': dc_price_toFixed, // Discount price, asbsoulte value
-				'OPTITM04': lnItm.pre_tax_price,
-				'OPTITM05': lnItm.price,
+				'OPTITM04': lnItm.pre_tax_price, // Subtotal by line item-level, quantities aggregated
+				'OPTITM05': lnItm.price, // Original price
 				'OPTITM06': '',
 				'OPTITM07': '',
 				'OPTITM08': '',
