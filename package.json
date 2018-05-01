@@ -27,6 +27,7 @@
     "moment": "^2.21.0",
     "mongoose": "^5.0.11",
     "node-excel-stream": "^1.0.0",
+    "npm": "^6.0.0",
     "path": "^0.12.7",
     "request": "^2.85.0",
     "xlsx": "^0.12.8"

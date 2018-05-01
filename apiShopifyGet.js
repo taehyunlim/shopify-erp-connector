@@ -22,7 +22,7 @@ const shopname = config.shopify_shopname_prod;
 // Database Setup
 const mongoose = require('mongoose');
 const models = require('./Models/OrderSchema.js')
-const databaseName = 'zsdb_test';
+const databaseName = 'zsdb';
 const dbURI = `mongodb://localhost:27017/${databaseName}`;
 mongoose.Promise = global.Promise;
 // Set Mongoose models as constant variables
@@ -34,8 +34,9 @@ const openOrder = models.OpenOrders,
 const baseurl = `https://${apikey}:${password}@${shopname}.myshopify.com`;
 const dateString = moment().format("YYYYMMDD");
 const dateTimeString = moment().format("YYYYMMDD_HHmm");
-const savePathName = `./OrderImport/${dateString}`;
+const savePathNameRef = `./OrderImport/${dateString}`;
 const saveFileNameRef = `ShopifyAPI_Orders_${dateTimeString}.xlsx`;
+const savePathNameOMP = '../SageInbound_current/NewOrder/.';
 const saveFileNameOMP = `OE_NewOrder_${dateTimeString}_ZINUS.xlsx`;
 const currentFileName = path.basename(__filename);
 
@@ -53,29 +54,33 @@ const timestamp = (timeObject, addDay = 0) => {
 	return moment(timeObject).add(addDay, 'day').format("YYYYMMDD_HHmm");
 }
 
-// System log (Saved under [./savePathName/dateString/])
+// System log (Saved under [./savePathNameRef/dateString/])
 const sysLogFile = `systemLog_${dateTimeString}.txt`;
 const sysLogBody = `\r\n@${dateTimeString}[${currentFileName}] >>> `;
 const systemLog = (log) => {
 	// DEV NOTE: Dev mode only
 	console.log(log);
-	fs.appendFileSync(`./${savePathName}/${sysLogFile}`, sysLogBody + log);
+	fs.appendFileSync(`./${savePathNameRef}/${sysLogFile}`, sysLogBody + log);
 }
 
-// Initialize savePathName directory
-// Initialize savePathName directory
+// Initialize savePathNameRef directory
+// Initialize savePathNameRef directory
 (function() {
 	if (!fs.existsSync('./OrderImport')) {
 		fs.mkdirSync('./OrderImport');
 	}
-	if (!fs.existsSync(savePathName)) {
-		fs.mkdirSync(savePathName);
+	if (!fs.existsSync(savePathNameRef)) {
+		fs.mkdirSync(savePathNameRef);
 	}
 }());
 
 // Rounding for cent calcuation
 const truncateToCent = (value) => {
 	return Number(Math.floor(value * 100) / 100);
+}
+// Rounding for cent calcuation (Tax only)
+const roundToCent = (value) => {
+	return Number(Math.round(value * 100) / 100);
 }
 
 // Unhandled Rejection
@@ -123,8 +128,7 @@ const recallPromise = new Promise((resolve, reject) => {
 const getOrdersPromise = (latestOrderId) => {
 	return new Promise((resolve, reject) => {
 		request({
-			// url: baseurl + `/admin/orders.json?financial_status=paid&since_id=${latestOrderId}&limit=250`,
-			url: baseurl + `/admin/orders.json?financial_status=paid&since_id=482508832831&limit=250`,
+			url: baseurl + `/admin/orders.json?financial_status=paid&since_id=${latestOrderId}&limit=250`,
 			json: true,
 		}, function (error, response, body) {
 			if (error) throw error;
@@ -192,8 +196,8 @@ const transformOrderExcel = (orders) => {
 		order['zinus_po'] = "ZC" + order.order_number;
 		// Two-Letter State code for Washington DC
 		let shipState = (order.shipping_address.province === 'District of Columbia') ? 'DC' : order.shipping_address.province;
-		// Handle Recycling Fees
-		let orderRecyclingFee = (order.shipping_lines[0]) ? order.shipping_lines[0].discounted_price : 0;
+		// Handle Recycling Fees (Order level)
+		let orderRecyclingFee = (order.shipping_lines[0]) ? parseFloat(order.shipping_lines[0].discounted_price) : 0;
 		order['order_recycling_fee'] = orderRecyclingFee;
 		// Handle discount coupon code: Hardcoded to take in the fixed 0th code only
 		let discount_code = (order.discount_codes.length > 0) ? order.discount_codes[0]['code'] : '';
@@ -207,16 +211,27 @@ const transformOrderExcel = (orders) => {
 			let lnItm = line_items[j];
 			// Increment the globally scoped Order Index
 			order_index++;
+			// Pre-tax unit price
+			let line_items_unit_pre_tax = parseFloat(lnItm.pre_tax_price / lnItm.quantity);
 			// Handle nested tax object
 			let line_items_tax_price = 0,
 				line_items_tax_rate = 0;
 			if (lnItm.tax_lines.length > 0) {
 				let line_items_tax_lines = lnItm.tax_lines;
-				line_items_tax_price = truncateToCent(line_items_tax_lines.reduce((sum, e) => sum + parseFloat(e["price"]), 0));
 				line_items_tax_rate = line_items_tax_lines.reduce((sum, e) => sum + parseFloat(e["rate"]), 0);
+				line_items_tax_price = line_items_tax_lines.reduce((sum, e) => sum + parseFloat(e["price"]), 0);
 			};
-			// Pre-tax unit price
-			let line_item_unit_pre_tax = parseFloat(lnItm.pre_tax_price / lnItm.quantity);
+			// Handle recylcing fee by line item
+			let line_items_recycling_fee = 0;
+			if (orderRecyclingFee > 0) {
+				// If shipping_lines[0].title contains "x" then parse the last letter (e.g. RecylceFee CA x2 => 2); Otherwise, set to 1.
+				let multiplier_parsed = (order.shipping_lines[0].title.indexOf('x') > -1) ? parseInt(order.shipping_lines[0].title.slice(-1)) : 1;
+				// Only apply if the line item is a mattress
+				let line_items_title = lnItm.title.toLowerCase();
+				if (line_items_title.indexOf("mattress") > -1 || line_items_title.indexOf("box spring") > -1) {
+					line_items_recycling_fee = truncateToCent(orderRecyclingFee / multiplier_parsed * lnItm.quantity);
+				}
+			}
 
 			// Discount Map Search
 			let dc_percent = 0;
@@ -297,11 +312,11 @@ const transformOrderExcel = (orders) => {
 				'ITEM': lnItm.sku,
 				'QTYORDERED': lnItm.quantity,
 				'ORDUNIT': 'ea',
-				'UNITPRICE': line_item_unit_pre_tax,
-				'OPTITM01': line_items_tax_price,
-				'OPTITM02': '',
+				'UNITPRICE': line_items_unit_pre_tax, // Unit price (before tax), per qty
+				'OPTITM01': line_items_tax_price, // Tax price by line item, qty aggregated
+				'OPTITM02': line_items_recycling_fee, // Recylcing fee by line item, qty aggregated
 				'OPTITM03': dc_price_toFixed, // Discount price, asbsoulte value
-				'OPTITM04': lnItm.pre_tax_price, // Subtotal by line item-level, quantities aggregated
+				'OPTITM04': lnItm.pre_tax_price, // Subtotal by line item, qty aggregated
 				'OPTITM05': lnItm.price, // Original price
 				'OPTITM06': '',
 				'OPTITM07': '',
@@ -347,9 +362,9 @@ const excelWritePromise1 = (ordersExcel, colsExcel) => {
 		Promise.all(promisesArray)
 			.then(() => { return ExcelWriteStreamOMP.save(); })
 			.then((stream) => {
-				stream.pipe(fs.createWriteStream(`./${savePathName}/${saveFileNameRef}`))
+				stream.pipe(fs.createWriteStream(`./${savePathNameRef}/${saveFileNameRef}`))
 			})
-			.then(() => resolve(`[Excel] ${saveFileNameRef} successfually saved at: ${savePathName}`))
+			.then(() => resolve(`[Excel] ${saveFileNameRef} successfually saved at: ${savePathNameRef}`))
 			.catch((error) => reject(error));
 	});
 }
@@ -363,7 +378,7 @@ const excelWritePromise2 = (ordersExcel, colsExcel) => {
 		acc.name = val;
 		acc.key = val;
 		// Set default 0 for OPTITM01 column (OMP requirement)
-		if (val === 'OPTITM01') {
+		if (val === 'OPTITM01' || val === 'OPTITM02') {
 			acc.default = 0;
 		}
 		return acc;
@@ -392,9 +407,9 @@ const excelWritePromise2 = (ordersExcel, colsExcel) => {
 		Promise.all(promisesArray)
 			.then(() => { return ExcelWriteStreamOMP.save(); })
 			.then((stream) => {
-				stream.pipe(fs.createWriteStream(`./${savePathName}/${saveFileNameOMP}`))
+				stream.pipe(fs.createWriteStream(`./${savePathNameOMP}/${saveFileNameOMP}`))
 			})
-			.then(() => resolve(`[Excel] ${saveFileNameOMP} successfually saved at: ${savePathName}`))
+			.then(() => resolve(`[Excel] ${saveFileNameOMP} successfually saved at: ${savePathNameOMP}`))
 			.catch((error) => reject(error));
 	});
 }
