@@ -37,6 +37,7 @@ const dateTimeString = moment().format("YYYYMMDD_HHmm");
 const savePathNameRef = `./OrderImport/${dateString}`;
 const saveFileNameRef = `ShopifyAPI_Orders_${dateTimeString}.xlsx`;
 const savePathNameOMP = '../SageInbound_current/NewOrder/.';
+// const savePathNameOMP = '\\\\192.168.1.122\\Logfire_Integration\\SageInbound_current\\NewOrder';
 const saveFileNameOMP = `OE_NewOrder_${dateTimeString}_ZINUS.xlsx`;
 const currentFileName = path.basename(__filename);
 
@@ -129,6 +130,7 @@ const getOrdersPromise = (latestOrderId) => {
 	return new Promise((resolve, reject) => {
 		request({
 			url: baseurl + `/admin/orders.json?financial_status=paid&since_id=${latestOrderId}&limit=250`,
+			// url: baseurl + `/admin/orders.json?financial_status=paid&since_id=484230791230&limit=250`,
 			json: true,
 		}, function (error, response, body) {
 			if (error) throw error;
@@ -245,7 +247,6 @@ const transformOrderExcel = (orders) => {
 				dc_qry1 = jsonQuery(['dclist[* title=? & products~? | variants~?].value', discount_code, lnItm.product_id, lnItm.variant_id],{data:dcResult});
 				if(dc_qry1.value != null && dc_qry1.value.length > 0){	//
 					dc_percent = parseInt(dc_qry1.value);
-					systemLog('[DEV] DC_VALUE: '+ JSON.stringify(dc_percent));
 				}
 			}
 			let dc_price = Math.abs((dc_percent/100) * parseFloat(lnItm.price));
@@ -292,7 +293,7 @@ const transformOrderExcel = (orders) => {
 				'EXPDATE': moment(order.created_at).add(5, 'day').format("YYYYMMDD"),
 				'DELVBYDATE': moment(order.created_at).add(10, 'day').format("YYYYMMDD"),
 				'WHCODE': '',
-				'STATUS': '0',
+				'STATUS': 0,
 				'OPTORD01': order.order_number,
 				'OPTORD02': order.total_price,
 				'OPTORD03': order.subtotal_price, // Order subtotal excludes tax and recycling fee
@@ -407,7 +408,7 @@ const excelWritePromise2 = (ordersExcel, colsExcel) => {
 		Promise.all(promisesArray)
 			.then(() => { return ExcelWriteStreamOMP.save(); })
 			.then((stream) => {
-				stream.pipe(fs.createWriteStream(`./${savePathNameOMP}/${saveFileNameOMP}`))
+				stream.pipe(fs.createWriteStream(`${savePathNameOMP}\\${saveFileNameOMP}`))
 			})
 			.then(() => resolve(`[Excel] ${saveFileNameOMP} successfually saved at: ${savePathNameOMP}`))
 			.catch((error) => reject(error));

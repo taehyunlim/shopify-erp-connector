@@ -1,0 +1,2 @@
+node apiShopifyGet.js
+exit
