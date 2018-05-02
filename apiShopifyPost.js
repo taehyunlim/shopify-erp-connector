@@ -134,33 +134,26 @@ function requestCallback(err, rowCount, rows) {
     var oldCols = ['PONUMBER', 'ORDNUMBER', 'LOCATION', 'COMPANY', 'ORDDATE', 'SHIPTRACK', 'ONHOLD', 'HOLDREASON', 'INVNUM', 'REFERENCE'];
 
     Object.keys(row).forEach((key) => {
-      //console.log(key + " ::: " + row[key].value);
-      tmpObj[key] = row[key].value;
-      tmpObj[cols[0]] = tmpObj[oldCols[0]]; //zinus_po = PONUMBER
-      tmpObj[cols[1]] = tmpObj[oldCols[1]]; //sage_order_number = ORDNUMBER
-      tmpObj[cols[2]] = tmpObj[oldCols[2]]; //wh_code = LOCATION
-      tmpObj[cols[3]] = tmpObj[oldCols[3]]; //company = COMPANY
-      tmpObj[cols[4]] = moment(tmpObj[oldCols[4]]).format("YYYYMMDD_HHmm"); //date_orderd: YUJI TO UPDATE
-      if (tmpObj[oldCols[5]] !== ',') {
-        tmpObj[cols[5]] = tmpObj[oldCols[5]]; //tracking_no
-      } else {
-        tmpObj[cols[5]] = '';
-      }
-      if (tmpObj['ONHOLD'] === '1') {
-        //console.log(tmpObj['HOLDREASON']);
-        //console.log(tmpObj['PONUMBER']);
-        switch (tmpObj['HOLDREASON']) {
-          case 'CC':
-            tmpObj['status'] = 'Customer Cancel';
-            break;
-          case 'OOS':
-            tmpObj['status'] = 'Out of Stock';
-            break;
-          default:
-            tmpObj['status'] = tmpObj['HOLDREASON'];
-        }
-      }
-    })
+			//console.log(key + " ::: " + row[key].value);
+			tmpObj[key] = row[key].value;
+			tmpObj[cols[0]] = tmpObj[oldCols[0]]; //zinus_po = PONUMBER
+			tmpObj[cols[1]] = tmpObj[oldCols[1]]; //sage_order_number = ORDNUMBER
+			tmpObj[cols[2]] = tmpObj[oldCols[2]]; //wh_code = LOCATION
+			tmpObj[cols[3]] = tmpObj[oldCols[3]]; //company = COMPANY
+			tmpObj[cols[4]] = moment(tmpObj[oldCols[4]]).format("YYYYMMDD_HHmm"); //date_orderd: YUJI TO UPDATE
+			// Tracking Number
+			if (tmpObj[oldCols[5]] !== ',') {
+				tmpObj[cols[5]] = tmpObj[oldCols[5]]; //tracking_no
+			} else {
+				tmpObj[cols[5]] = '';
+			}
+			// If onhold
+			if (tmpObj['ONHOLD'] === '1') {
+				tmpObj[cols[6]] = tmpObj['HOLDREASON'];
+			} else {
+				tmpObj[cols[6]] = '';
+			}
+		})
     // Delete old columns
     for (var i = 0; i < oldCols.length; i++) {
       delete tmpObj[oldCols[i]];
@@ -191,15 +184,18 @@ function mongodbCb(data) {
 				//openOrder.updateMany(query, { $set: { m_tracking_no: fulfillObj.m_tracking_no }})
 				bulk.find(query).update({ $set: fulfillObj });
 				bulkCounter++;
-				// Exit condition
-				if (bulkCounter === data.length) {
-					bulk.execute((err, result) => {
-						if (err) throw err;
-						systemLog("nMatched: " + result.nMatched + "; nModified: " + result.nModified);
-						processExit();
-					});
-				}
+			} else {
+				bulkCounter++;
 			}
+			// Exit condition
+			if (bulkCounter === data.length) {
+				bulk.execute((err, result) => {
+					if (err) throw err;
+					systemLog("nMatched: " + result.nMatched + "; nModified: " + result.nModified);
+					processExit();
+				});
+			}
+
     	}) // END OF forEach LOOP
  	}) // END OF db.once()
 }
