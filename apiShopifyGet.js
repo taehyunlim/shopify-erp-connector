@@ -37,12 +37,7 @@ const dateTimeString = moment().format("YYYYMMDD_HHmm");
 const savePathNameRef = `./OrderImport/${dateString}`;
 const saveFileNameRef = `ShopifyAPI_Orders_${dateTimeString}.xlsx`;
 const savePathNameOMP = '../SageInbound_current/NewOrder/.';
-<<<<<<< HEAD
 const saveFileNameOMP = `.OE_NewOrder_${dateTimeString}_ZINUS.xlsx`;
-=======
-// const savePathNameOMP = '\\\\192.168.1.122\\Logfire_Integration\\SageInbound_current\\NewOrder';
-const saveFileNameOMP = `OE_NewOrder_${dateTimeString}_ZINUS.xlsx`;
->>>>>>> e06a21c80a517e44494e891a4e2f14b2198c5c6e
 const currentFileName = path.basename(__filename);
 
 // Discount Related
@@ -68,7 +63,6 @@ const systemLog = (log) => {
 	fs.appendFileSync(`./${savePathNameRef}/${sysLogFile}`, sysLogBody + log);
 }
 
-// Initialize savePathNameRef directory
 // Initialize savePathNameRef directory
 (function() {
 	if (!fs.existsSync('./OrderImport')) {
@@ -133,12 +127,7 @@ const recallPromise = new Promise((resolve, reject) => {
 const getOrdersPromise = (latestOrderId) => {
 	return new Promise((resolve, reject) => {
 		request({
-<<<<<<< HEAD
 			url: baseurl + `/admin/orders.json?limit=250&since_id=${latestOrderId}`,
-=======
-			url: baseurl + `/admin/orders.json?financial_status=paid&since_id=${latestOrderId}&limit=250`,
-			// url: baseurl + `/admin/orders.json?financial_status=paid&since_id=484230791230&limit=250`,
->>>>>>> e06a21c80a517e44494e891a4e2f14b2198c5c6e
 			json: true,
 		}, function (error, response, body) {
 			if (error) throw error;
