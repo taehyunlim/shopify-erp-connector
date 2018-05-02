@@ -176,32 +176,32 @@ function requestCallback(err, rowCount, rows) {
 
 // Write to MongoDB using Mongoose models
 function mongodbCb(data) {
-    let queryLoop = 0;
-  //console.log(data);
-  mongoose.connect(dbURI);
-  db.on('error', console.error.bind(console, 'connection error:::'));
-  db.once('open', () => {
-    var openOrder = models.OpenOrders;
-    var bulk = openOrder.collection.initializeOrderedBulkOp();
-    // To invoke a callback after async functions are run through forEach
-    var bulkCounter = 0;
-    data.forEach((fulfillObj, index, array) => {
-      // Loop through fulfillment object array (arg: data)
-      var query = { zinus_po: fulfillObj.zinus_po };
-      //openOrder.updateMany(query, { $set: { m_tracking_no: fulfillObj.m_tracking_no }})
-      bulk.find(query).update( {$set: fulfillObj} );
-      bulkCounter++;
-      // Exit condition
-      if (bulkCounter === data.length) {
-        bulk.execute((err, result) => {
-          if (err) throw err;
-          systemLog("nMatched: " + result.nMatched + "; nModified: " + result.nModified);
-            processExit();  
-        })
-      }
-
-    }) // END OF forEach LOOP
-  }) // END OF db.once()
+	//console.log(data);
+	mongoose.connect(dbURI);
+	db.on('error', console.error.bind(console, 'connection error:::'));
+	db.once('open', () => {
+		var openOrder = models.OpenOrders;
+		var bulk = openOrder.collection.initializeOrderedBulkOp();
+		// To invoke a callback after async functions are run through forEach
+		var bulkCounter = 0;
+		data.forEach((fulfillObj, index, array) => {
+			// Loop through fulfillment object array (arg: data)
+			if (fulfillObj.tracking_no.length > 12) {
+				var query = { zinus_po: fulfillObj.zinus_po };
+				//openOrder.updateMany(query, { $set: { m_tracking_no: fulfillObj.m_tracking_no }})
+				bulk.find(query).update({ $set: fulfillObj });
+				bulkCounter++;
+				// Exit condition
+				if (bulkCounter === data.length) {
+					bulk.execute((err, result) => {
+						if (err) throw err;
+						systemLog("nMatched: " + result.nMatched + "; nModified: " + result.nModified);
+						processExit();
+					});
+				}
+			}
+    	}) // END OF forEach LOOP
+ 	}) // END OF db.once()
 }
 
 function processExit() {
