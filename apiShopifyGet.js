@@ -294,7 +294,7 @@ const transformOrderExcel = (orders) => {
 				'WHCODE': '',
 				'STATUS': 0,
 				'OPTORD01': order.order_number,
-				'OPTORD02': order_total_price, // Order total price cannot be 0 (in case of 100% coupon): 1 cent will be added in which case
+				'OPTORD02': order_total_price.toString(), // Order total price cannot be 0 (in case of 100% coupon): 1 cent will be added in which case
 				'OPTORD03': order.subtotal_price, // Order subtotal excludes tax and recycling fee
 				'OPTORD04': order.total_tax, // Aggregate tax amount (line items and city/county/state levels)
 				'OPTORD05': moment(order.created_at).format("MM/DD/YYYY"),
