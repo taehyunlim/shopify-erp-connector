@@ -193,6 +193,8 @@ const transformOrderExcel = (orders) => {
 		let order = orders[i];
 		// Assign Zinus PO, which is Order # prefixed by "ZC"
 		order['zinus_po'] = "ZC" + order.order_number;
+		// Order total price cannot be 0 (in case of 100% coupon): 1 cent will be added in which case
+		let order_total_price = (parseFloat(order.total_price) < 0.01) ? 0.01 : order.total_price;
 		// Two-Letter State code for Washington DC
 		let shipState = (order.shipping_address.province === 'District of Columbia') ? 'DC' : order.shipping_address.province;
 		// Handle Recycling Fees (Order level)
@@ -292,12 +294,12 @@ const transformOrderExcel = (orders) => {
 				'WHCODE': '',
 				'STATUS': 0,
 				'OPTORD01': order.order_number,
-				'OPTORD02': order.total_price,
+				'OPTORD02': order.total_price, // Order total price cannot be 0 (in case of 100% coupon): 1 cent will be added in which case
 				'OPTORD03': order.subtotal_price, // Order subtotal excludes tax and recycling fee
 				'OPTORD04': order.total_tax, // Aggregate tax amount (line items and city/county/state levels)
 				'OPTORD05': moment(order.created_at).format("MM/DD/YYYY"),
-				'OPTORD06': orderDiscPercent,
-				'OPTORD07': orderDiscFixed,
+				'OPTORD06': '',
+				'OPTORD07': '',
 				'OPTORD08': order.total_discounts,
 				'OPTORD09': 'FedEx Ground',
 				'OPTORD10': discount_code,
