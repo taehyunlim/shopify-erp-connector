@@ -73,6 +73,8 @@ WHERE (
 	AND (CONVERT(DATETIME, RTRIM(OEORDH.ORDDATE)) >= CONVERT(DATETIME, @dateReleased)) 
 )`;
 // AND RTRIM(OEORDH1.SHIPTRACK) <> ''
+// AND(RTRIM(OEORDH.ONHOLD) = '1')
+// AND (ORDNUMBER LIKE 'ORD32074%')
 
 /* =================================================== */
 
@@ -125,7 +127,7 @@ const sageDbQueryPromise = new Promise((resolve, reject) => {
 	let request = new Request(sqlQueryOEORDH, (err, rowCount, rows) => {
 		if (err) throw err;
 		if (rowCount === 0) {
-			reject("Query returned no rows");
+			reject("[MSSQL] Query returned no rows");
 		} else {
 			let rowOrders = transformRows(rows)
 			resolve(rowOrders);
@@ -135,22 +137,44 @@ const sageDbQueryPromise = new Promise((resolve, reject) => {
 	request.addParameter('dateReleased', TYPES.Date, dateStringQuery);
 	// Initiate connection
 	connection.on('connect', function(err) {
-		if (err) return systemLog("SQL Connection Error: " + err);
+		if (err) return systemLog("[MSSQL] SQL Connection Error: " + err);
 		connection.execSql(request);
 	})
 });
 
 // Transform returned rows into MongoDB queryable objects
 const transformRows = ((rows) => {
+	// Create an empty array to insert rows into
 	let rowOrders = [];
-	rows.forEach((row) => {
+	rows.forEach(row => {
+		let trackNo = row['SHIPTRACK'].value;
+		let isNew = false;
+		let isNewTrack = false;
+		if (trackNo.length > 10) {
+			// If trackNo is found, then insert to rowOrders array
+			isNew = true;
+			// Remove any exisitng row 
+			rowOrders = rowOrders.filter((e) => {
+				return e.zinus_po !== row['PONUMBER'].value;
+			})
+		} else {
+			// No trackNo return for the row
+			// Declare poExist function that returns a boolean
+			function poExist(e) { return e.zinus_po === row['PONUMBER'].value; }
+			// Insert only if there is no existing row with the same PO
+			if (rowOrders.find(poExist) == null) {
+				isNew = true;
+			}
+		}
 		let entry = {};
 		entry['zinus_po'] = row['PONUMBER'].value;
 		entry['sage_order_number'] = row['ORDNUMBER'].value;
 		entry['wh_code'] = row['LOCATION'].value;
 		entry['company'] = row['COMPANY'].value;
-		entry['date_ordered_sage'] = row['ORDDATE'].value;
-		entry['tracking_no'] = row['SHIPTRACK'].value;
+		entry['date_ordered_sage'] = timestamp(row['ORDDATE'].value);
+		entry['date_imported'] = timestamp(row['ORDDATE'].value);
+		//entry['date_fulfilled'] = dateTimeString;	
+		entry['tracking_no'] = trackNo;
 		if (searchRow(row['HOLDREASON'], "cc") || searchRow(row['HOLDREASON'], "oos")) {
 			entry['status'] = row['HOLDREASON'].value;
 			if (searchRow(row['HOLDREASON'], "cc")) {
@@ -158,8 +182,11 @@ const transformRows = ((rows) => {
 				entry['closed'] = true;
 			}
 		}
-		rowOrders.push(entry);
+		if (isNew) {
+			rowOrders.push(entry);
+		}
 	})
+	// Return the array of transformed rows 
 	return rowOrders;
 })
 
@@ -170,51 +197,71 @@ function searchRow(rowProp, string) {
 	} else { return false; }
 }
 
-// Declare a MongoDB promise
-const mongoDbPromise  = ((rowOrders) => {
+// Declare a MongoDB promise (Update)
+const mongoUpdatePromise = ((rowOrders) => {
 	return new Promise((resolve, reject) => {
-		let db = mongoose.connection;
 		mongoose.connect(dbURI)
 		.catch(error => systemLog(error))
 		.then(() => {
-			
-		})
-		// resolve(rowOrders);
+			// Initialize a bulk operation using Mongoose bulk object
+			let bulk = openOrder.collection.initializeOrderedBulkOp();
+			let bulkCounter = 0;
+			// Loop over the rows and find/update each row
+			rowOrders.forEach((rowOrder) => {
+				let query = { zinus_po: rowOrder.zinus_po };
+				bulk.find(query).update({ $set: rowOrder });
+				bulkCounter++;
+			})
+			// Exit bulk operation
+			if (bulkCounter === rowOrders.length) {
+				bulk.execute((err, result) => {
+					if (err) throw err;
+					resolve("[MongoDB] nMatched: " + result.nMatched + "; nModified: " + result.nModified);
+				});
+			}
+		}) // End of .then()
+	}) // End of new Promise instance
+});
+
+// Declare another MongoDB promise (Read)
+const mongoReadPromise = (() => {
+	return new Promise((resolve, reject) => {
+		openOrder.find({}, (err, data) => {
+			if (err) throw err;
+			if (data.length === 0) {
+				reject("[MongoDB] No open orders found");
+			} else {
+				systemLog("[MongoDB] Total fulfillment count: " + data.length);
+				resolve(transformFulfillment(data));
+			}
+		});
+
+	}) // End of new Promise instance
+});
+
+const transformFulfillment = ((data) => {
+	let fulfillmentArray = [];
+	data.forEach(order => {
+		let fulfillment = {};
+		fulfillment['orderId'] = order.shopify_order_id;
+		fulfillment['requestBody'] = {
+			fulfillment: {
+				tracking_company: 'FedEx',
+				tracking_numbers: order.tracking_no
+			}
+		};
+		fulfillmentArray.push(fulfillment);
 	})
+	return fulfillmentArray;	
 });
 
 
-function mongodbCb(data) {
-	//console.log(data);
-	mongoose.connect(dbURI);
-	db.on('error', console.error.bind(console, 'connection error:::'));
-	db.once('open', () => {
-		var openOrder = models.OpenOrders;
-		var bulk = openOrder.collection.initializeOrderedBulkOp();
-		// To invoke a callback after async functions are run through forEach
-		var bulkCounter = 0;
-		data.forEach((fulfillObj, index, array) => {
-			// Loop through fulfillment object array (arg: data)
-			if (fulfillObj.tracking_no.length > 12) {
-				var query = { zinus_po: fulfillObj.zinus_po };
-				//openOrder.updateMany(query, { $set: { m_tracking_no: fulfillObj.m_tracking_no }})
-				bulk.find(query).update({ $set: fulfillObj });
-				bulkCounter++;
-			} else {
-				bulkCounter++;
-			}
-			// Exit condition
-			if (bulkCounter === data.length) {
-				bulk.execute((err, result) => {
-					if (err) throw err;
-					systemLog("nMatched: " + result.nMatched + "; nModified: " + result.nModified);
-					processExit();
-				});
-			}
-
-		}) // END OF forEach LOOP
-	}) // END OF db.once()
-}
+// Declare a MongoDB promise
+const postFulfillPromise = ((fulfillments) => {
+	return new Promise((resolve, reject) => {
+		resolve(fulfillments);
+	});
+})
 
 /* =================================================== */
 
@@ -223,54 +270,24 @@ function mongodbCb(data) {
 sageDbQueryPromise
 .then((rowOrders) => {
 	// console.log(rowCount);
-	return mongoDbPromise(rowOrders);
-	connection.close();
+	return mongoUpdatePromise(rowOrders);
+})
+.then((result) => {
+	systemLog(result);
+	return mongoReadPromise();
+})
+.then((fulfillments) => {
+	return postFulfillPromise(fulfillments);
 })
 .then((result) => {
 	systemLog(result);
 	connection.close();
+	mongoose.disconnect();
 })
 .catch((error) => {
 	systemLog(error);
 	connection.close();
+	mongoose.disconnect();
 })
 
 
-
-// Write to MongoDB using Mongoose models
-function mongodbCb(data) {
-	//console.log(data);
-	mongoose.connect(dbURI);
-	db.on('error', console.error.bind(console, 'connection error:::'));
-	db.once('open', () => {
-		var openOrder = models.OpenOrders;
-		var bulk = openOrder.collection.initializeOrderedBulkOp();
-		// To invoke a callback after async functions are run through forEach
-		var bulkCounter = 0;
-		data.forEach((fulfillObj, index, array) => {
-			// Loop through fulfillment object array (arg: data)
-			if (fulfillObj.tracking_no.length > 12) {
-				var query = { zinus_po: fulfillObj.zinus_po };
-				//openOrder.updateMany(query, { $set: { m_tracking_no: fulfillObj.m_tracking_no }})
-				bulk.find(query).update({ $set: fulfillObj });
-				bulkCounter++;
-			} else {
-				bulkCounter++;
-			}
-			// Exit condition
-			if (bulkCounter === data.length) {
-				bulk.execute((err, result) => {
-					if (err) throw err;
-					systemLog("nMatched: " + result.nMatched + "; nModified: " + result.nModified);
-					processExit();
-				});
-			}
-
-    	}) // END OF forEach LOOP
- 	}) // END OF db.once()
-}
-
-function processExit() {
-  db.close();
-  process.exit();
-}
