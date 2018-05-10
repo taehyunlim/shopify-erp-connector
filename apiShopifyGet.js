@@ -128,6 +128,7 @@ const getOrdersPromise = (latestOrderId) => {
 	return new Promise((resolve, reject) => {
 		request({
 			url: baseurl + `/admin/orders.json?limit=250&since_id=${latestOrderId}`,
+			// url: baseurl + `/admin/orders.json?limit=1&status=any&since_id=492715081790`, 
 			json: true,
 		}, function (error, response, body) {
 			if (error) throw error;
@@ -378,7 +379,7 @@ const excelWritePromise2 = (ordersExcel, colsExcel) => {
 		acc.name = val;
 		acc.key = val;
 		// Set default 0 for OPTITM01 column (OMP requirement)
-		if (val === 'OPTITM01' || val === 'OPTITM02' || val === 'UNITPRICE') {
+		if (val === 'OPTITM01' || val === 'OPTITM02' || val === 'UNITPRICE' || val === 'STATUS') {
 			acc.default = 0;
 		}
 		return acc;

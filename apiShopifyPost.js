@@ -6,6 +6,14 @@ const moment = require('moment');
 const Request = require('tedious').Request;
 const TYPES = require('tedious').TYPES;
 const Connection = require('tedious').Connection;
+const request = require('request');
+
+// Throttling
+const Bottleneck = require('bottleneck');
+const limiter = new Bottleneck({
+	maxConcurrent: 1,
+	minTime: 100
+});
 
 // Shopify API Credential
 const config = require('./config.js');
@@ -182,6 +190,9 @@ const transformRows = ((rows) => {
 				entry['closed'] = true;
 			}
 		}
+		if (trackNo.length > 10) {
+			entry['status'] = 'fulfilled'
+		}
 		if (isNew) {
 			rowOrders.push(entry);
 		}
@@ -231,7 +242,7 @@ const mongoReadPromise = (() => {
 			if (data.length === 0) {
 				reject("[MongoDB] No open orders found");
 			} else {
-				systemLog("[MongoDB] Total fulfillment count: " + data.length);
+				systemLog("[MongoDB] Total open orders count: " + data.length);
 				resolve(transformFulfillment(data));
 			}
 		});
@@ -239,29 +250,123 @@ const mongoReadPromise = (() => {
 	}) // End of new Promise instance
 });
 
-const transformFulfillment = ((data) => {
+const transformFulfillment = (data => {
 	let fulfillmentArray = [];
 	data.forEach(order => {
 		let fulfillment = {};
+		let trackingArray = order.tracking_no.replace(" ", "").split(",").filter(v => v != " ").filter(v => v != "");
 		fulfillment['orderId'] = order.shopify_order_id;
 		fulfillment['requestBody'] = {
 			fulfillment: {
 				tracking_company: 'FedEx',
-				tracking_numbers: order.tracking_no
+				tracking_numbers: trackingArray
 			}
 		};
+		fulfillment['updateBody'] = {
+			order: {
+				"id": order.shopify_order_id,
+				"tags": `sage_status: ${order.status}, test`
+			}
+		}
+		console.log(JSON.stringify(fulfillment));
 		fulfillmentArray.push(fulfillment);
 	})
 	return fulfillmentArray;	
 });
 
-
-// Declare a MongoDB promise
-const postFulfillPromise = ((fulfillments) => {
+// Put order update promise
+const putUpdatePromise = (updates => {
 	return new Promise((resolve, reject) => {
-		resolve(fulfillments);
-	});
+		let updatesArray = [];
+		updates.forEach(update => {
+			let orderId = update.orderId;
+			let reqOptions = {
+				method: 'PUT',
+				url: baseurl + '/admin/orders/' + orderId + '.json',
+				body: update.updateBody,
+				json: true,
+				orderId: orderId
+			};
+			// updatesArray.push(limiter.schedule(postRequest, reqOptions))
+		}) 
+
+		Promise.all(updatesArray.map(p => p.catch(e => e)))
+		.then(results => {
+			console.log(results)
+		}).catch(e => {
+			if (e) throw e;
+		});
+
+		let requestArray = []
+		updates.forEach(fulfillment => {
+			let orderId = fulfillment.orderId;
+			let reqOptions = {
+				method: 'POST',
+				url: baseurl + '/admin/orders/' + orderId + '/fulfillments.json',
+				body: fulfillment.requestBody,
+				json: true,
+				orderId: orderId
+			};
+			requestArray.push(limiter.schedule(postRequest, reqOptions))
+		});
+
+		Promise.all(requestArray.map(p => p.catch(e => e)))
+		.then(results => {
+			console.log("promise all returned resolved")
+			resolve(results)
+		}).catch(e => {
+			systemLog(e);
+			reject("postFulfillmentPromise failed to return resolved");
+		});
+
+	})
 })
+
+// Post fulfillment promise
+const postFulfillPromise = (fulfillments => {
+	return new Promise((resolve, reject) => {
+		let requestArray = []
+		fulfillments.forEach(fulfillment => {
+			let orderId = fulfillment.orderId;
+			let reqOptions = {
+				method: 'POST',
+				url: baseurl + '/admin/orders/' + orderId + '/fulfillments.json',
+				body: fulfillment.requestBody,
+				json: true,
+				orderId: orderId
+			};
+			requestArray.push(limiter.schedule(postRequest, reqOptions))
+		});
+
+		Promise.all(requestArray.map( p => p.catch(e => e) ))
+		.then(results => {
+			console.log("promise all returned resolved")
+			resolve(results)
+		}).catch(e => {
+			systemLog(e);
+			reject("postFulfillmentPromise failed to return resolved");
+		});
+	})
+	
+})
+
+const postRequest = (options) => {
+	return new Promise((resolve, reject) => {
+		request(options, (error, response, body) => {
+			if (error) throw error;
+			let result = {};
+			result["orderId"] = options.orderId;
+			console.log(`=========================== Status Code: ${response.statusCode} ===========================`);
+			if (response.statusCode === 200 || response.statusCode === 201) {
+				result["ok"] = true;
+				resolve(result);
+			} else {
+				result["ok"] = false;
+				resolve(result);
+			}
+		})
+	})
+}
 
 /* =================================================== */
 
@@ -277,7 +382,8 @@ sageDbQueryPromise
 	return mongoReadPromise();
 })
 .then((fulfillments) => {
-	return postFulfillPromise(fulfillments);
+	// return postFulfillPromise(fulfillments);
+	return putUpdatePromise(fulfillments);
 })
 .then((result) => {
 	systemLog(result);
