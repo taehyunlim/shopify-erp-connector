@@ -128,7 +128,7 @@ const getOrdersPromise = (latestOrderId) => {
 	return new Promise((resolve, reject) => {
 		request({
 			url: baseurl + `/admin/orders.json?limit=250&since_id=${latestOrderId}`,
-			// url: baseurl + `/admin/orders.json?limit=1&status=any&since_id=492715081790`, 
+			// url: baseurl + `/admin/orders.json?limit=250&status=any&since_id=493102432318`, 
 			json: true,
 		}, function (error, response, body) {
 			if (error) throw error;

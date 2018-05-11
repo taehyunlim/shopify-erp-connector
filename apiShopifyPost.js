@@ -82,7 +82,8 @@ WHERE (
 )`;
 // AND RTRIM(OEORDH1.SHIPTRACK) <> ''
 // AND(RTRIM(OEORDH.ONHOLD) = '1')
-// AND (ORDNUMBER LIKE 'ORD32074%')
+// AND (ORDNUMBER LIKE 'ORD320899%')
+
 
 /* =================================================== */
 
@@ -183,16 +184,19 @@ const transformRows = ((rows) => {
 		entry['date_imported'] = timestamp(row['ORDDATE'].value);
 		//entry['date_fulfilled'] = dateTimeString;	
 		entry['tracking_no'] = trackNo;
-		if (searchRow(row['HOLDREASON'], "cc") || searchRow(row['HOLDREASON'], "oos")) {
+		// If/Then logic for order status update
+		if ((searchRow(row['HOLDREASON'], "duplicate") === false) && row['HOLDREASON'].value.length > 1) {
 			entry['status'] = row['HOLDREASON'].value;
 			if (searchRow(row['HOLDREASON'], "cc")) {
 				entry['cancelled'] = true;
 				entry['closed'] = true;
 			}
-		}
-		if (trackNo.length > 10) {
+		} else if (trackNo.length > 10) {
 			entry['status'] = 'fulfilled'
+		} else {
+			entry['status'] = "imported"
 		}
+		// Now, push entry to the rowOrders array
 		if (isNew) {
 			rowOrders.push(entry);
 		}
@@ -265,10 +269,10 @@ const transformFulfillment = (data => {
 		fulfillment['updateBody'] = {
 			order: {
 				"id": order.shopify_order_id,
-				"tags": `sage_status: ${order.status}, test`
+				"tags": `sage_ord_num: ${order.sage_order_number}, sage_status: ${order.status}`
 			}
 		}
-		console.log(JSON.stringify(fulfillment));
+		console.log(JSON.stringify(fulfillment));		
 		fulfillmentArray.push(fulfillment);
 	})
 	return fulfillmentArray;	
@@ -279,15 +283,21 @@ const putUpdatePromise = (updates => {
 	return new Promise((resolve, reject) => {
 		let updatesArray = [];
 		updates.forEach(update => {
-			let orderId = update.orderId;
-			let reqOptions = {
-				method: 'PUT',
-				url: baseurl + '/admin/orders/' + orderId + '.json',
-				body: update.updateBody,
-				json: true,
-				orderId: orderId
-			};
-			// updatesArray.push(limiter.schedule(postRequest, reqOptions))
+			let tagsString = "";
+			getOrderTags(update)
+				.then(result => {
+					tagsString = result;
+					update.updateBody.order.tags += ", " + tagsString;
+					let orderId = update.orderId;
+					let reqOptions = {
+						method: 'PUT',
+						url: baseurl + '/admin/orders/' + orderId + '.json',
+						body: update.updateBody,
+						json: true,
+						orderId: orderId
+					};
+					updatesArray.push(limiter.schedule(postRequest, reqOptions))
+				});			
 		}) 
 
 		Promise.all(updatesArray.map(p => p.catch(e => e)))
@@ -307,7 +317,12 @@ const putUpdatePromise = (updates => {
 				json: true,
 				orderId: orderId
 			};
-			requestArray.push(limiter.schedule(postRequest, reqOptions))
+			// Only call fulfillment API if tracking numbers are present
+			if (fulfillment.requestBody.fulfillment.tracking_numbers.length > 0) {
+				console.log(JSON.stringify(fulfillment.requestBody.fulfillment));
+				requestArray.push(limiter.schedule(postRequest, reqOptions));
+			} 
+			
 		});
 
 		Promise.all(requestArray.map(p => p.catch(e => e)))
@@ -322,7 +337,24 @@ const putUpdatePromise = (updates => {
 	})
 })
 
-// Post fulfillment promise
+const getOrderTags = (fulfillment => {
+	return new Promise((resolve, reject) => {
+		let orderId = fulfillment.orderId;
+		request({
+			url: baseurl + '/admin/orders/' + orderId,
+			json: true,
+		}, (error, response, body) => {
+			if (error) throw error;
+			if (body.order && body.order.tags.length > 0) {
+				resolve(body.order.tags)
+			} else {
+				reject("");
+			}
+		})
+	})
+})
+
+// Post fulfillment promise (Deprecated)
 const postFulfillPromise = (fulfillments => {
 	return new Promise((resolve, reject) => {
 		let requestArray = []
