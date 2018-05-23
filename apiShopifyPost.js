@@ -28,7 +28,7 @@ const shopname = config.shopify_shopname_prod;
 const baseurl = `https://${apikey}:${password}@${shopname}.myshopify.com`;
 const dateString = moment().format("YYYYMMDD");
 const dateTimeString = moment().format("YYYYMMDD_HHmm");
-const dateStringQuery = moment().subtract(7, 'day').format("MM/DD/YYYY");
+const dateStringQuery = moment().subtract(3, 'day').format("MM/DD/YYYY");
 const savePathNameRef = `./OrderImport/${dateString}`;
 const saveFileNameRef = `ShopifyAPI_Orders_${dateTimeString}.xlsx`;
 const savePathNameOMP = '../SageInbound_current/NewOrder/.';
@@ -248,7 +248,7 @@ const mongoUpdateFulfill = ((orderIdArray) => {
 			let bulkCounter = 0;
 			// Loop over the rows and find/update each row
 			orderIdArray.forEach((orderId) => {
-				let query = { shopify_order_id: orderId };
+				let query = { shopify_order_id: parseInt(orderId) };
 				bulk.find(query).update({ $set: { closed: true } });
 				bulkCounter++;
 			})
@@ -296,7 +296,8 @@ const transformFulfillment = (data => {
 				"tags": `sage_ord_num: ${order.sage_order_number}, sage_status: ${order.status}`
 			}
 		}
-		console.log(JSON.stringify(fulfillment));		
+		// Dev Only
+		// console.log(JSON.stringify(fulfillment));		
 		fulfillmentArray.push(fulfillment);
 	})
 	return fulfillmentArray;	
@@ -333,11 +334,11 @@ const getOrderTags = (updates => {
 		
 		Promise.all(requestArray.map(p => p.catch(e => e)))
 			.then(results => {
-				console.log("getOrderTagsRequest all returned resolved")
+				systemLog("[API] getOrderTagsRequest Promise.all resolved")
 				resolve(results)
 			}).catch(e => {
 				systemLog(e);
-				reject("getOrderTagsRequest failed to return resolved");
+				reject("[API] getOrderTagsRequest Promise.all failed resolve");
 			});
 
 	})
@@ -375,11 +376,11 @@ const putUpdatePromise = (updates => {
 
 		Promise.all(requestArray.map(p => p.catch(e => e)))
 			.then(results => {
-				console.log("promise all returned resolved")
+				systemLog("[API] putUpdatePromise Promise.all resolved")
 				resolve(results)
 			}).catch(e => {
 				systemLog(e);
-				reject("postFulfillmentPromise failed to return resolved");
+				reject("[API] putUpdatePromise Promise.all failed to resolve");
 			});
 
 	})
@@ -400,7 +401,6 @@ const postFulfillPromise = (fulfillments => {
 			};
 			// Only call fulfillment API if tracking numbers are present
 			if (fulfillment.requestBody.fulfillment.tracking_numbers.length > 0) {
-				console.log(JSON.stringify(fulfillment.requestBody.fulfillment));
 				requestArray.push(limiter.schedule(postRequest, reqOptions));
 			}
 
@@ -408,11 +408,11 @@ const postFulfillPromise = (fulfillments => {
 
 		Promise.all(requestArray.map(p => p.catch(e => e)))
 		.then(results => {
-			console.log("promise all returned resolved")
+			systemLog("[API] postFulfillmentPromise Promise.all resolved")
 			resolve(results)
 		}).catch(e => {
 			systemLog(e);
-			reject("postFulfillmentPromise failed to return resolved");
+			reject("[API] postFulfillmentPromise Promise.all failed to resolve");
 		});
 
 	})
@@ -426,20 +426,67 @@ const postRequest = (options) => {
 			if (options.method === "PUT") {
 				result["fulfillment_status"] = body.order.fulfillment_status;
 				result["closed_at"] = body.order.closed_at;
+				result["cancelled_at"] = body.order.cancelled_at;
 			}
 			result["orderId"] = options.orderId;		
 			// result["fulfillment_status"] = fulfill_stat;
-			console.log(`======== ${options.method} / OrderId: ${options.orderId} / Status Code: ${response.statusCode} ========`);
+			systemLog(`[API] Method: ${options.method} / OrderId: ${options.orderId} / Status Code: ${response.statusCode} / Options: ${JSON.stringify(options.body)}`);
 			resolve(result);
-			// if (response.statusCode === 200 || response.statusCode === 201) {
-			// 	result["ok"] = true;
-			// 	resolve(result);
-			// } else {
-			// 	result["ok"] = false;
-			// 	resolve(result);
-			// }
 		})
 	})
+}
+
+const mongoRemovePromise = (data) => {
+	return new Promise((resolve, reject) => {
+		// Initialize a bulk operation using Mongoose bulk object
+		let bulkOpen = openOrder.collection.initializeOrderedBulkOp();
+		let bulkClosed = closedOrder.collection.initializeOrderedBulkOp();
+		let bulkCounter = 0;
+		// forEach loop over the returned result from Shopify
+		data.forEach((doc) => {
+			let query = { shopify_order_id: parseInt(doc.orderId) };
+			if (doc.cancelled_at || doc.closed_at) {
+				// Set {closed: true} and etc. if cancelled_at and/or closed_at is truthy
+				if (doc.cancelled_at) {
+					bulkOpen.find(query).update({ $set: { closed: true, cancelled: true } });
+				} else if (doc.closed_at) {
+					bulkOpen.find(query).update({ $set: { closed: true, posted: true } });
+				}
+			}
+			bulkCounter++;
+		})
+		// Exit bulk operation
+		if (bulkCounter === data.length) {
+			bulkOpen.execute((err, result) => {
+				if (err) throw err;
+				systemLog("[MongoDB] Set {closed: true}; nMatched: " + result.nMatched + "; nModified: " + result.nModified);
+				// Move closed docs from openOrder to closedOrder
+				let bulkInsert = closedOrder.collection.initializeUnorderedBulkOp();
+				let bulkRemove = openOrder.collection.initializeUnorderedBulkOp();
+				openOrder.find({ closed: true }, (err, data) => {
+					data.forEach(doc => {
+						bulkInsert.insert(doc);
+						bulkRemove.find({ _id: doc._id }).removeOne();
+					})
+					bulkInsert.execute((err, result) => {
+						if (err) { 
+							systemLog(JSON.stringify(err)); 
+						} else {
+							systemLog(`[MongoDB] Inserted {closed: true} to {closedOrder}; nInserted: ${result.nInserted}`)
+						}
+						// Finally, remove exisitng closed orders from openOrder
+						bulkRemove.execute((err, result) => {
+							if (err) throw err;
+							resolve(`[MongoDB] Removed {closed: true} orders from {openOrder}; nRemoved: ${result.nRemoved}`);
+						})
+					});
+				})
+				
+			});
+		}
+				
+	}) // End of .then()
+	
 }
 
 /* =================================================== */
@@ -450,15 +497,14 @@ sageDbQueryPromise
 .then((rowOrders) => {
 	// console.log(rowCount);
 	return mongoUpdatePromise(rowOrders);
-})
-.then((result) => {
+}).then((result) => {
 	systemLog(result);
 	return mongoReadPromise();
-})
-.then((fulfillments) => {
+}).then((fulfillments) => {
 	return putPostPromise(fulfillments);
-})
-.then((result) => {
+}).then((result) => {
+	return mongoRemovePromise(result);
+}).then((result) => {
 	systemLog(result);
 	connection.close();
 	mongoose.disconnect();
